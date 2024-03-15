@@ -1,0 +1,27 @@
+# Deploy the infrastructure using the template from the work
+# You have to practice this workshop module using workflow studio to see how SF created 
+
+# or
+
+# Copy the SF code generated above
+# Modify the given template (Note that the SF code generated using Workflow studio and added to the template)
+# Delete the stack created above and re-create it using the new template
+
+
+# Go to the state machine just created
+# Execute it using the sample input shown below:
+{
+  "comment": "An input comment.",
+  "data": {
+  "value1": 23,
+  "value2": 17
+  },
+  "extra": "foo",
+  "lambda": {
+  "who": "AWS Step Functions"
+  }
+}
+
+# Go to the the Data Flow Simulator to learn more about State Input, InputPath, Parameter, 
+# TaskResult, ResultSelector, ResultPath, OutputPath, and State Output
+# 

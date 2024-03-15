@@ -1,0 +1,48 @@
+# Welcome to the interactive portion of this workshop!
+# This section introduces you to some of the foundational concepts of Step Functions including the Task state and the various Flow states. 
+# The first module inside is a Hello World workflow.
+# If you are a Step Functions beginner this is a great place to start.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Step Functions sample project for scheduling a task using Wait State type and passing inputs
+
+Resources:
+  StatesExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: '/'
+
+  TimerStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: |-
+        {
+          "Comment": "An example of the Amazon States Language for scheduling a task.",
+          "StartAt": "Wait for Timer",
+          "States": {
+            "Wait for Timer": {
+              "Type": "Wait",
+              "SecondsPath": "$.timer_seconds",
+              "Next": "Success"
+            },
+            "Success": {
+              "Type": "Succeed"
+            }
+          }
+        }
+      RoleArn: !GetAtt [StatesExecutionRole, Arn]
+
+Outputs:
+  StateMachineArn:
+    Value:
+      Ref: TimerStateMachine
+  ExecutionInput:
+    Description: Sample input to StartExecution.
+    Value: '{ "timer_seconds": 10 }'

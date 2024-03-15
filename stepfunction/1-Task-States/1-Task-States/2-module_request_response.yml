@@ -1,0 +1,79 @@
+# When Step Functions calls another service using the Task state, 
+# the default pattern is Request Response . With this service integration pattern, 
+# Step Functions will call the service and then immediately proceed to the next state. 
+# The Task state will not wait for the underlying job to complete.
+# In this module you will run a Task using the Request Response pattern.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Step Functions sample project demonstrating the Request Response pattern
+
+
+Resources:
+  SNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: 'RequestResponseTopic'
+
+  StatesExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sns:Publish'
+                Resource: !Ref SNSTopic
+
+  RequestResponseStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: !Sub
+        - |-
+          {
+            "Comment": "An example of the Amazon States Language for scheduling a task.",
+            "StartAt": "Wait for Timestamp",
+            "States": {
+              "Wait for Timestamp": {
+                "Type": "Wait",
+                "SecondsPath": "$.timer_seconds",
+                "Next": "Send SNS Message"
+              },
+              "Send SNS Message": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::sns:publish",
+                "Parameters":{  
+                  "TopicArn": "${topicArn}",
+                  "Message.$":"$.message"
+                },
+                "End": true
+              }
+            }
+          }
+        - { topicArn: !Ref SNSTopic }
+      RoleArn: !GetAtt [StatesExecutionRole, Arn]
+
+Outputs:
+  StateMachineArn:
+    Value:
+      Ref: RequestResponseStateMachine
+  ExecutionInput:
+    Description: Sample input to StartExecution.
+    Value: !Sub
+      - |-
+        {
+          "topic": "${topicArn}",
+          "message": "Welcome to re:Invent!",
+          "timer_seconds": 5
+        }
+      - { topicArn: !Ref SNSTopic }

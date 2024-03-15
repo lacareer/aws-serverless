@@ -1,0 +1,47 @@
+# First deploy the stack and then do the below;
+# You have to practice this workshop module using workflow studio to see how SF created 
+# Now jump to the "Step A"
+
+# or
+
+# Copy the SF code generated above
+# Modify the given template (Note that the SF code generated using Workflow studio and added to the template)
+# Delete the stack created above and re-create it using the new template
+# Jump to "Step A"
+
+# To integrate API with SF do the following:
+
+****** Asynchronous call ********
+# step A
+
+1. Go to the API Gateway console  and select the API created for this module: API Gateway State Machine integration.
+2. From the list of resources find the execution resource and click on POST
+3. Click on Integration Request
+4. For the Integration type select AWS Service
+5. Configure the integration:
+  (i) AWS Region: select the AWS region where you created the State Machine
+  (ii) AWS Service: select Step Functions from the dropdown
+  (iii) HTTP Method: select POST
+  (iv) Action Type: select Use action name
+  (v) Action: type "StartExecution"
+  (vi) Execution role: find in IAM  the role with IntegrationIamRole in its name and use the ARN of this role
+  (vii) Click Save. When prompted if you are sure that you want to switch the integration click Ok. You have now set up an integration between API Gateway and Step Functions.
+# sample input to 
+
+# step B
+
+1. Repeat step 1 in step A
+2. Click on Test under Execution Method
+3. Enter the below as input in the Request Body
+  {
+  "input": "{\"data\": [20,40,60,10,9]}",
+  "name": "MyExecution",
+  "stateMachineArn": "Enter State machine ARN"
+  }
+4. Click on Test
+
+
+****** synchronous call ********
+1. Just edit the  value of "Action Type" in "Asynchronous call" => tstepA => 5 => (iv) to "StartSyncExecution" 
+   and save by clicking the check mark beside the input box
+2. Repeat step  B to test

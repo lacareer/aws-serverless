@@ -1,0 +1,11 @@
+{
+  "comment": "An input comment.",
+  "data": {
+  "value1": 23,
+  "value2": 17
+  },
+  "extra": "foo",
+  "lambda": {
+  "who": "AWS Step Functions"
+  }
+  }

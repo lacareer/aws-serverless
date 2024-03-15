@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  stepfunctions-rest-api
+
+  Sample SAM Template for stepfunctions-rest-api
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+Resources:
+
+  HelloWorldApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      DefinitionBody:
+        'Fn::Transform':
+          Name: 'AWS::Include'
+          Parameters:
+            Location: 'api.yaml'
+
+  HelloWorldStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: hello_world.asl.json
+      Role: !GetAtt HelloWorldStateMachineRole.Arn
+      Type: EXPRESS
+
+  RestApiRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - apigateway.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+      - PolicyName: AllowSFNExec
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: "states:StartSyncExecution"
+              Resource: !GetAtt HelloWorldStateMachine.Arn
+  HelloWorldStateMachineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action: sts:AssumeRole
+Outputs:
+  HelloWorldApi:
+    Description: "API Gateway endpoint URL to call Hello World State Machine"
+    Value: !Sub "https://${HelloWorldApi}.execute-api.${AWS::Region}.amazonaws.com/dev/"
+  HelloWorldStateMachineArn:
+    Description: "Hello World State Machine ARN"
+    Value: !Ref HelloWorldStateMachine
+  HelloWorldStateMachineRole:
+    Description: "IAM Role created for Hello World State Machine based on the specified SAM Policy Templates"
+    Value: !GetAtt HelloWorldStateMachineRole.Arn
