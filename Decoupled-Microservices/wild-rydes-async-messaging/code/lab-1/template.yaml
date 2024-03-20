@@ -14,7 +14,9 @@ Globals:
       author: aws
 
 Resources:
-
+# note that if an API event is added to a SAM resource without an explicit reference to an API resource in the template
+# SAM creates an API using the stack name of the template. This is the case in this template.
+# https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   SubmitRideCompletionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
@@ -23,12 +25,12 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref RidesTable
-          # TOPIC_ARN: !Ref RideCompletionTopic
+          TOPIC_ARN: !Ref RideCompletionTopic
       Policies:
         - DynamoDBCrudPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
             TableName: !Ref RidesTable
-        # - SNSPublishMessagePolicy:
-        #     TopicName: !GetAtt RideCompletionTopic.TopicName
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt RideCompletionTopic.TopicName
       Events:
         WildRydes:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
@@ -44,42 +46,42 @@ Resources:
     Properties:
       CodeUri: customer_accounting_service/
       Handler: app.lambda_handler
-      # Events:
-      #   SNSEvent:
-      #     Type: SNS
-      #     Properties:
-      #       Topic: !Ref RideCompletionTopic
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref RideCompletionTopic
 
   CustomerNotificationFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: customer_notification_service/
       Handler: app.lambda_handler
-      # Events:
-      #   SNSEvent:
-      #     Type: SNS
-      #     Properties:
-      #       Topic: !Ref RideCompletionTopic      
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref RideCompletionTopic      
 
   ExtraordinaryRidesFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: extraordinary_rides_service/
       Handler: app.lambda_handler
-      # Events:
-      #   SNSEvent:
-      #     Type: SNS
-      #     Properties:
-      #       Topic: !Ref RideCompletionTopic
-      #       FilterPolicy:
-      #         fare:
-      #           - numeric:
-      #               - '>='
-      #               - 50
-      #         distance:
-      #           - numeric:
-      #               - '>='
-      #               - 20
+      Events:
+        SNSEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref RideCompletionTopic
+            FilterPolicy:
+              fare:
+                - numeric:
+                    - '>='
+                    - 50
+              distance:
+                - numeric:
+                    - '>='
+                    - 20
 
   RidesTable:
     Type: AWS::Serverless::SimpleTable
@@ -89,10 +91,10 @@ Resources:
         Name: id
         Type: String  
 
-  # RideCompletionTopic:
-  #   Type: AWS::SNS::Topic
-  #   Properties:
-  #     TopicName: RideCompletionTopic
+  RideCompletionTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: RideCompletionTopic
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function

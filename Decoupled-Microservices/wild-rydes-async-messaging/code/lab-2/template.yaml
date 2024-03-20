@@ -7,7 +7,7 @@ Description: >
 Globals:
   Function:
     Timeout: 10
-    Runtime: python3.9
+    Runtime: python3.10
     Tags:
       project: wild-rydes
       workshop: asynchronous-messaging-workshop
@@ -22,12 +22,12 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref RidesTable
-          # TOPIC_ARN: !Ref RideCompletionTopic
+          TOPIC_ARN: !Ref RideCompletionTopic
       Policies:
         - DynamoDBCrudPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
             TableName: !Ref RidesTable
-        # - SNSPublishMessagePolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
-        #     TopicName: !GetAtt RideCompletionTopic.TopicName
+        - SNSPublishMessagePolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
+            TopicName: !GetAtt RideCompletionTopic.TopicName
       Events:
         WildRydes:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
@@ -43,146 +43,146 @@ Resources:
         Name: id
         Type: String
 
-  # RideCompletionTopic:
-  #   Type: AWS::SNS::Topic
-  #   Properties:
-  #     TopicName: RideCompletionTopic
+  RideCompletionTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: RideCompletionTopic
 
   CustomerAccountingService:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: generic-backend-microservice/
       Handler: app.lambda_handler
-      ReservedConcurrentExecutions: 5
+      # ReservedConcurrentExecutions: 10
       Environment:
         Variables:
           SERVICE_NAME: CustomerAccountingService
-    #   Policies:
-    #     - SQSPollerPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
-    #         QueueName: !Ref CustomerAccountingServiceQueue
-    # Events:
-    #    CustomerAccountingServiceJobQueue:
-    #      Type: SQS
-    #      Properties:
-    #        Queue: !GetAtt CustomerAccountingServiceQueue.Arn
-    #        BatchSize: 1
+      Policies:
+        - SQSPollerPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
+            QueueName: !Ref CustomerAccountingServiceQueue
+      Events:
+        CustomerAccountingServiceJobQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CustomerAccountingServiceQueue.Arn
+            BatchSize: 1
 
   CustomerNotificationService:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: generic-backend-microservice/
       Handler: app.lambda_handler
-      ReservedConcurrentExecutions: 5
+      # ReservedConcurrentExecutions: 10
       Environment:
         Variables:
           SERVICE_NAME: CustomerNotificationService
-      # Policies:
-      #   - SQSPollerPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
-      #       QueueName: !Ref CustomerNotificationServiceQueue
-      # Events:
-      #   CustomerNotificationServiceJobQueue:
-      #     Type: SQS
-      #     Properties:
-      #       Queue: !GetAtt CustomerNotificationServiceQueue.Arn
-      #       BatchSize: 1
+      Policies:
+        - SQSPollerPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
+            QueueName: !Ref CustomerNotificationServiceQueue
+      Events:
+        CustomerNotificationServiceJobQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CustomerNotificationServiceQueue.Arn
+            BatchSize: 1
 
   ExtraordinaryRidesService:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: generic-backend-microservice/
       Handler: app.lambda_handler
-      ReservedConcurrentExecutions: 5
+      # ReservedConcurrentExecutions: 10
       Environment:
         Variables:
           SERVICE_NAME: ExtraordinaryRidesService
-      # Policies:
-      #   - SQSPollerPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
-      #       QueueName: !Ref ExtraordinaryRidesServiceQueue
-      # Events:
-      #   ExtraordinaryRidesServiceJobQueue:
-      #     Type: SQS
-      #     Properties:
-      #       Queue: !GetAtt ExtraordinaryRidesServiceQueue.Arn
-      #       BatchSize: 1
+      Policies:
+        - SQSPollerPolicy: # https://github.com/awslabs/serverless-application-model/blob/develop/samtranslator/policy_templates_data/policy_templates.json
+            QueueName: !Ref ExtraordinaryRidesServiceQueue
+      Events:
+        ExtraordinaryRidesServiceJobQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ExtraordinaryRidesServiceQueue.Arn
+            BatchSize: 1
 
-  # CustomerAccountingServiceQueue:
-  #   Type: AWS::SQS::Queue
+  CustomerAccountingServiceQueue:
+    Type: AWS::SQS::Queue
 
-  # CustomerAccountingServiceQueuePolicy:
-  #     Type: AWS::SQS::QueuePolicy
-  #     Properties:
-  #       Queues:
-  #         - !Ref CustomerAccountingServiceQueue
-  #       PolicyDocument:
-  #         Statement:
-  #           Effect: Allow
-  #           Principal: '*'
-  #           Action: sqs:SendMessage
-  #           Resource: '*'
-  #           Condition:
-  #             ArnEquals:
-  #               aws:SourceArn: !Ref RideCompletionTopic
+  CustomerAccountingServiceQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref CustomerAccountingServiceQueue
+        PolicyDocument:
+          Statement:
+            Effect: Allow
+            Principal: '*'
+            Action: sqs:SendMessage
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RideCompletionTopic
 
-  # CustomerAccountingServiceQueueToRidesTopicSubscription:
-  #     Type: AWS::SNS::Subscription
-  #     Properties:
-  #       Endpoint: !GetAtt CustomerAccountingServiceQueue.Arn
-  #       Protocol: sqs
-  #       RawMessageDelivery: true
-  #       TopicArn: !Ref RideCompletionTopic
+  CustomerAccountingServiceQueueToRidesTopicSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Endpoint: !GetAtt CustomerAccountingServiceQueue.Arn
+        Protocol: sqs
+        RawMessageDelivery: true
+        TopicArn: !Ref RideCompletionTopic
 
-  # CustomerNotificationServiceQueue:
-  #   Type: AWS::SQS::Queue
+  CustomerNotificationServiceQueue:
+    Type: AWS::SQS::Queue
 
-  # CustomerNotificationServiceQueuePolicy:
-  #     Type: AWS::SQS::QueuePolicy
-  #     Properties:
-  #       Queues:
-  #         - !Ref CustomerNotificationServiceQueue
-  #       PolicyDocument:
-  #         Statement:
-  #           Effect: Allow
-  #           Principal: '*'
-  #           Action: sqs:SendMessage
-  #           Resource: '*'
-  #           Condition:
-  #             ArnEquals:
-  #               aws:SourceArn: !Ref RideCompletionTopic
+  CustomerNotificationServiceQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref CustomerNotificationServiceQueue
+        PolicyDocument:
+          Statement:
+            Effect: Allow
+            Principal: '*'
+            Action: sqs:SendMessage
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RideCompletionTopic
 
-  # CustomerNotificationServiceQueueToRidesTopicSubscription:
-  #     Type: AWS::SNS::Subscription
-  #     Properties:
-  #       Endpoint: !GetAtt CustomerNotificationServiceQueue.Arn
-  #       Protocol: sqs
-  #       RawMessageDelivery: true
-  #       TopicArn: !Ref RideCompletionTopic
+  CustomerNotificationServiceQueueToRidesTopicSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Endpoint: !GetAtt CustomerNotificationServiceQueue.Arn
+        Protocol: sqs
+        RawMessageDelivery: true
+        TopicArn: !Ref RideCompletionTopic
 
-  # ExtraordinaryRidesServiceQueue:
-  #   Type: AWS::SQS::Queue
+  ExtraordinaryRidesServiceQueue:
+    Type: AWS::SQS::Queue
 
-  # ExtraordinaryRidesServiceQueuePolicy:
-  #     Type: AWS::SQS::QueuePolicy
-  #     Properties:
-  #       Queues:
-  #         - !Ref ExtraordinaryRidesServiceQueue
-  #       PolicyDocument:
-  #         Statement:
-  #           Effect: Allow
-  #           Principal: '*'
-  #           Action: sqs:SendMessage
-  #           Resource: '*'
-  #           Condition:
-  #             ArnEquals:
-  #               aws:SourceArn: !Ref RideCompletionTopic
+  ExtraordinaryRidesServiceQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref ExtraordinaryRidesServiceQueue
+        PolicyDocument:
+          Statement:
+            Effect: Allow
+            Principal: '*'
+            Action: sqs:SendMessage
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref RideCompletionTopic
 
-  # ExtraordinaryRidesServiceQueueToRidesTopicSubscription:
-  #     Type: AWS::SNS::Subscription
-  #     Properties:
-  #       Endpoint: !GetAtt ExtraordinaryRidesServiceQueue.Arn
-  #       Protocol: sqs
-  #       RawMessageDelivery: true
-  #       TopicArn: !Ref RideCompletionTopic
-  #       FilterPolicy: { "fare": [{"numeric": [">=", 50]}], "distance": [{"numeric": [">=", 20]}] }
+  ExtraordinaryRidesServiceQueueToRidesTopicSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Endpoint: !GetAtt ExtraordinaryRidesServiceQueue.Arn
+        Protocol: sqs
+        RawMessageDelivery: true
+        TopicArn: !Ref RideCompletionTopic
+        FilterPolicy: { "fare": [{"numeric": [">=", 50]}], "distance": [{"numeric": [">=", 20]}] }
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
