@@ -1258,7 +1258,7 @@ Or, you can repeat Step 1 to get a new ID_TOKEN.
 
   Go to ReadMe-Dashboard.md
 
-<!-- Module 2 completed -->
+<!-- Module 3 completed -->
 Before you delete resources... 
 
 Before you delete the workshop, we recommend reviewing the stack in the CloudFormation console so you can see the value of SAM templates:

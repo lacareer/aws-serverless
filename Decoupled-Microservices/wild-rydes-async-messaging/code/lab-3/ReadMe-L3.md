@@ -16,7 +16,7 @@ In this architecture queues provide a loose coupling between the producer and co
 The service can be enhanced further to notify customers once all the service providers have responded or have exceeded the time for them to respond.
 
 <!-- Build the lab artifacts from source -->
-We provide you with an AWS SAM  template which we will use to bootstrap the initial state. In the bash tab (at the bottom) in you AWS Cloud9 IDE, run the following commands to build the lab code:
+We provide you with an AWS SAM  template which we will use to bootstrap the initial state. In the bash tab (at the bottom) in your IDE, run the following commands to build the lab code:
 
     cd ~/environment/wild-rydes-async-messaging/code/lab-3
     sam build
