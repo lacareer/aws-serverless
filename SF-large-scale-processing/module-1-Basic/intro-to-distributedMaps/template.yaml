@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Step Functions Introduction to Distributed map
+
+Resources:
+  HelloDMapResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+  HelloDMapDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  StatesExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AWSXrayFullAccess
+      Policies:
+        - PolicyName: ReadDataPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - S3:GetObject
+                  - S3:ListBucket
+                Resource:
+                  - !GetAtt  HelloDMapDataBucket.Arn
+                  - !Join ["/", [!GetAtt HelloDMapDataBucket.Arn, "*"]]
+        - PolicyName: WriteResultsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - S3:PutObject
+                Resource: !Join ["/", [!GetAtt HelloDMapResultsBucket.Arn, "*"]]
+        - PolicyName: StartExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:HelloDmapStateMachine*"
+
+  HelloDmapStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: !Sub
+        - |-
+          {
+        
+            "Comment": "Hello Distributed Map",
+            "StartAt": "Map",
+            "States": {
+              "Map": {
+                "Type": "Map",
+                "ItemProcessor": {
+                  "ProcessorConfig": {
+                    "Mode": "DISTRIBUTED",
+                    "ExecutionType": "EXPRESS"
+                  },
+                  "StartAt": "highly rated",
+                  "States": {
+                  "highly rated": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "highrated.$": "$.Items[?(@.rating == '4.0' || @.rating == '5.0' )]"
+                    },
+                    "End": true
+                  }
+                  }
+                },
+                "MaxConcurrency": 10000,
+                "ItemReader": {
+                  "Resource": "arn:aws:states:::s3:getObject",
+                  "ReaderConfig": {
+                    "InputType": "CSV",
+                    "CSVHeaderLocation": "FIRST_ROW"
+                  },
+                  "Parameters": {
+                    "Bucket": "${Databucket}",
+                    "Key.$": "$.key"
+                  }
+                },
+                "ItemBatcher": {
+                  "MaxItemsPerBatch": 1000
+                },
+                "ResultWriter": {
+                  "Resource": "arn:aws:states:::s3:putObject",
+                  "Parameters": {
+                    "Bucket": "${Resultsbucket}",
+                    "Prefix.$": "$.output"
+                  }
+                },
+                "ToleratedFailurePercentage": 1,
+                "End": true
+              }
+            }
+ 
+          }
+        - {
+            Databucket: !Ref HelloDMapDataBucket,
+            Resultsbucket: !Ref HelloDMapResultsBucket
+
+          } 
+
+      RoleArn: !GetAtt [StatesExecutionRole, Arn]
+
+Outputs:
+  StateMachineArn:
+    Value:
+      Ref: HelloDmapStateMachine
+  ExecutionInput:
+    Description: Sample input to state machine
+    Value: '{ "bucket": "bucket", "key":"data/jokes.csv", "output": "results"  }'
+
