@@ -1,0 +1,545 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Healthcare claims processing template'
+Resources:
+  DMapWorkshopHealthCareDestBucket:
+    Type: 'AWS::S3::Bucket'
+
+  DMapHealthCareDataPrepareLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: DMapHealthCareDataPrepareLambdaFunction
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import zipfile
+          import os
+          import cfnresponse
+          import urllib.request
+
+          def lambda_handler(event, context):
+            s3 = boto3.client('s3')
+            destination_bucket = os.environ["INPUT_DEST_BUCKET_NAME"]
+            source_bucket_url = os.environ["INPUT_SOURCE_BUCKET_URL"]
+            extraction_path = '/tmp/extract/'
+            extraction_file_location = extraction_path+'/dataset/'
+            response_status = cfnresponse.SUCCESS
+            try:
+              # Download the zip file from S3
+              
+              print(source_bucket_url)
+              
+              with urllib.request.urlopen(source_bucket_url) as response, open('/tmp/dataset.zip', 'wb') as outfile:
+                  outfile.write(response.read())
+              
+              print("File successfully downloaded !")
+
+              # Extract the contents of the zip file
+              with zipfile.ZipFile('/tmp/dataset.zip', 'r') as zip_ref:
+                  zip_ref.extractall(extraction_path)
+
+              # Upload the extracted files to the destination S3 bucket
+              for root, dirs, files in os.walk(extraction_file_location):
+                  for file in files:
+                      local_path = os.path.join(root, file)
+                      s3_key = file
+                      s3.upload_file(local_path, destination_bucket, s3_key)
+              response_message = {"Message": "Object copied successfully"}
+            except Exception as e:
+              response_status = cfnresponse.FAILED
+              response_message = {"Error": str(e)}
+            finally:
+                # Clean up the extraction directory
+                for file in os.listdir(extraction_file_location):
+                    file_path = os.path.join(extraction_file_location, file)
+                    os.remove(file_path)
+                os.remove('/tmp/dataset.zip')
+                os.rmdir(extraction_file_location)
+                os.rmdir(extraction_path)
+                
+                send_response(event, context, response_status, response_message)
+
+          def send_response(event, context, response_status, response_data, reason=None):
+            response_body = {
+                "Status": response_status,
+                "StackId": event['StackId'],
+                "RequestId": event['RequestId'],
+                "LogicalResourceId": event['LogicalResourceId'],
+                "Data": response_data
+            }
+
+            if reason:
+              response_body['Reason'] = reason
+
+            # Ensure "Data" is always an object
+            if not isinstance(response_body['Data'], dict):
+              response_body['Data'] = {}
+
+            response_json = json.dumps(response_body)
+
+            cfnresponse.send(event, context, response_status, response_body)
+
+      Role: !GetAtt DMapHealthCareDataPrepareLambdaExecutionRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.10
+      Timeout: 900
+      Environment:
+        Variables:
+          INPUT_DEST_BUCKET_NAME: !Sub '${DMapWorkshopHealthCareDestBucket}'
+          INPUT_SOURCE_BUCKET_URL: 'https://ws-assets-prod-iad-r-iad-ed304a55c2ca1aee.s3.us-east-1.amazonaws.com/2a22e604-2f2e-4d7b-85a8-33b38c999234/dataset/dataset.zip'
+  
+  DMapHealthCareDataPrepareLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: DMapHealthCareDataPrepareLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DMapHealthCareDataPrepareLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetLifecycleConfiguration
+                  - s3:PutLifecycleConfiguration
+                  - s3:DeleteObject
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}'
+                  - !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}/*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'  
+
+  DMapHealthCareDataPrepareLambdaLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DMapHealthCareDataPrepareLambdaFunction}'
+      RetentionInDays: 7
+
+  DMapHealthCareDataPrepareLambdaInvoke:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: DMapHealthCareDataPrepareLambdaFunction
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt DMapHealthCareDataPrepareLambdaFunction.Arn
+
+  DMapHealthCareDynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: 'DMapHealthCareClaimTable'
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  DMapHealthCareProcessingLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: DMapHealthCareProcessingLambdaFunction
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          from decimal import Decimal
+
+          s3 = boto3.client('s3')
+          dynamodb = boto3.resource('dynamodb')
+
+          def lambda_handler(event, context):
+            input_bucket_name = os.environ["INPUT_BUCKET_NAME"]
+            input_table_name = os.environ['INPUT_TABLE_NAME']
+            ClaimIds = []
+            for item in event["Items"]:
+              response = s3.get_object(Bucket=input_bucket_name, Key=item["Key"])
+              content = response['Body'].read().decode('utf-8')
+              
+              data = json.loads(content)
+              ddb_table = dynamodb.Table(input_table_name)
+              with ddb_table.batch_writer() as batch:
+                for record in data:
+                  item_to_put = json.loads(json.dumps(record), parse_float=Decimal)
+                  batch.put_item(
+                      Item=item_to_put
+                  )                                       
+                  ClaimIds.append(record.get('id'))
+              
+            return {
+                'statusCode': 200,
+                'body': ClaimIds
+            }
+      Role: !GetAtt DMapHealthCareProcessingLambdaExecutionRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.10
+      Timeout: 900
+      Environment:
+        Variables:
+          INPUT_BUCKET_NAME: !Sub '${DMapWorkshopHealthCareDestBucket}'
+          INPUT_TABLE_NAME: 'DMapHealthCareClaimTable'
+
+  DMapHealthCareProcessingLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: DMapHealthCareProcessingLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DMapHealthCareProcessingLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                Resource: !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}/*'
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:BatchWriteItem'
+                Resource: !GetAtt DMapHealthCareDynamoDBTable.Arn
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'  
+
+  DMapHealthCareProcessingLambdaLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DMapHealthCareProcessingLambdaFunction}'
+      RetentionInDays: 7
+
+  DMapHealthCareRuleEngineLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: DMapHealthCareRuleEngineLambdaFunction
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3 = boto3.client('s3')
+          dynamodb = boto3.resource('dynamodb')
+
+
+          def lambda_handler(event, context):
+            input_table_name = os.environ["INPUT_TABLE_NAME"]
+            ddb_table = dynamodb.Table(input_table_name)
+            approvedCount = 0
+            rejectedCount = 0
+            chunk_size = 100
+            claimIds = event["body"]
+            while claimIds:
+              chunkClaimIds, claimIds = claimIds[:chunk_size], claimIds[chunk_size:]
+              batch_keys = {
+                input_table_name: {
+                  'Keys' : [ {'id': claimId} for claimId in chunkClaimIds]
+                }
+              }
+              response = dynamodb.batch_get_item(RequestItems=batch_keys)
+              print(response['Responses'][input_table_name])
+              with ddb_table.batch_writer() as batch:    
+                for record in response['Responses'][input_table_name]:
+                  claim_amount = record.get('total').get('value')
+                  claim_support_info = record.get('supportingInfo')
+                  if claim_amount < 5000 or claim_support_info:
+                    record['claim_status'] = 'Approved'
+                    approvedCount += 1
+                  else:
+                    record['claim_status'] = 'Rejected'
+                    record['rejection_reason'] = 'Claim Amount is greater than $5000. Required Supporting info like Pre-approval letter.'
+                    rejectedCount +=1
+                  batch.put_item(
+                      Item=record
+                  )
+
+            return {
+                'statusCode': 200,
+                'body': json.dumps('Approved Records Count: ' + str(approvedCount) + ', Rejected Records Count: ' + str(rejectedCount))
+            }
+      Role: !GetAtt DMapHealthCareRuleEngineLambdaExecutionRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.10
+      Timeout: 900
+      Environment:
+        Variables:
+          INPUT_TABLE_NAME: 'DMapHealthCareClaimTable'
+
+  DMapHealthCareRuleEngineLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: DMapHealthCareRuleEngineLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DMapHealthCareRuleEngineLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:BatchWriteItem'
+                Resource: !GetAtt DMapHealthCareDynamoDBTable.Arn
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'  
+
+  DMapHealthCareRuleEngineLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DMapHealthCareRuleEngineLambdaFunction}'
+      RetentionInDays: 7
+  
+  HealthcareClaimProcessingStateMachineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+        Version: "2012-10-17"
+      Description: Stepfunction execution role
+
+  SFStateMachineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+      Path: '/'
+      Policies:
+        - PolicyName: SFStateMachineRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetLifecycleConfiguration
+                  - s3:PutLifecycleConfiguration
+                  - s3:DeleteObject
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}'
+                  - !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}/*'
+              - Action:
+                  - logs:CreateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:DescribeLogGroups
+                  - logs:DescribeResourcePolicies
+                  - logs:GetLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:UpdateLogDelivery
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                  - xray:PutTelemetryRecords
+                  - xray:PutTraceSegments
+                  - lambda:InvokeFunction
+                  - states:StartExecution
+                  - states:DescribeExecution
+                  - states:StopExecution
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Effect: Allow
+                Resource: "*" 
+
+  HealthcareClaimProcessingStateMachineRoleDefaultPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:GetBucketLocation
+              - s3:GetObjectVersion
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:GetLifecycleConfiguration
+              - s3:PutLifecycleConfiguration
+              - s3:DeleteObject
+            Effect: Allow
+            Resource:
+              - !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}'
+              - !Sub 'arn:aws:s3:::${DMapWorkshopHealthCareDestBucket}/*'
+          - Action:
+              - logs:CreateLogDelivery
+              - logs:DeleteLogDelivery
+              - logs:DescribeLogGroups
+              - logs:DescribeResourcePolicies
+              - logs:GetLogDelivery
+              - logs:ListLogDeliveries
+              - logs:PutResourcePolicy
+              - logs:UpdateLogDelivery
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+              - xray:PutTelemetryRecords
+              - xray:PutTraceSegments
+              - lambda:InvokeFunction
+              - states:StartExecution
+              - states:DescribeExecution
+              - states:StopExecution
+              - events:PutTargets
+              - events:PutRule
+              - events:DescribeRule
+            Effect: Allow
+            Resource: "*"
+        Version: "2012-10-17"
+      PolicyName: HealthcareClaimProcessingStateMachineRoleDefaultPolicy
+      Roles:
+        - Ref: HealthcareClaimProcessingStateMachineRole
+
+  # HealthCareClaimProcessingStateMachine:
+  #   Type: AWS::StepFunctions::StateMachine
+  #   Properties:
+  #     RoleArn: !GetAtt [SFStateMachineRole, Arn]
+  #     DefinitionString: !Sub
+  #       - |-
+  #         {
+  #           "Comment": "A description of my state machine",
+  #           "StartAt": "S3 object keys",
+  #           "States": {
+  #             "S3 object keys": {
+  #               "Type": "Map",
+  #               "ItemProcessor": {
+  #                 "ProcessorConfig": {
+  #                   "Mode": "DISTRIBUTED",
+  #                   "ExecutionType": "STANDARD"
+  #                 },
+  #                 "StartAt": "Load Claims",
+  #                 "States": {
+  #                   "Load Claims": {
+  #                     "Type": "Task",
+  #                     "Resource": "arn:aws:states:::lambda:invoke",
+  #                     "OutputPath": "$.Payload",
+  #                     "Parameters": {
+  #                       "Payload.$": "$",
+  #                       "FunctionName": "${ProcessingFunction}"
+  #                     },
+  #                     "Retry": [
+  #                       {
+  #                         "ErrorEquals": [
+  #                           "Lambda.ServiceException",
+  #                           "Lambda.AWSLambdaException",
+  #                           "Lambda.SdkClientException",
+  #                           "Lambda.TooManyRequestsException"
+  #                         ],
+  #                         "IntervalSeconds": 1,
+  #                         "MaxAttempts": 3,
+  #                         "BackoffRate": 2
+  #                       }
+  #                     ],
+  #                     "Next": "Validate claims"
+  #                   },
+  #                   "Validate claims": {
+  #                     "Type": "Task",
+  #                     "Resource": "arn:aws:states:::lambda:invoke",
+  #                     "OutputPath": "$.Payload",
+  #                     "Parameters": {
+  #                       "Payload.$": "$",
+  #                       "FunctionName": "${RuleFunction}"
+  #                     },
+  #                     "Retry": [
+  #                       {
+  #                         "ErrorEquals": [
+  #                           "Lambda.ServiceException",
+  #                           "Lambda.AWSLambdaException",
+  #                           "Lambda.SdkClientException",
+  #                           "Lambda.TooManyRequestsException"
+  #                         ],
+  #                         "IntervalSeconds": 1,
+  #                         "MaxAttempts": 3,
+  #                         "BackoffRate": 2
+  #                       }
+  #                     ],
+  #                     "End": true
+  #                   }
+  #                 }
+  #               },
+  #               "ItemReader": {
+  #                 "Resource": "arn:aws:states:::s3:listObjectsV2",
+  #                 "Parameters": {
+  #                   "Bucket": "${Databucket}"
+  #                 }
+  #               },
+  #               "MaxConcurrency": 10,
+  #               "Label": "HealthCareClaimProcessingStateMachine",
+  #               "End": true,
+  #               "ItemBatcher": {
+  #                 "MaxItemsPerBatch": 10
+  #               },
+  #               "ToleratedFailurePercentage": 5
+  #             }
+  #           }
+  #         }
+  #       - {
+  #           Databucket: !Ref DMapWorkshopHealthCareDestBucket,
+  #           ProcessingFunction: !GetAtt  DMapHealthCareProcessingLambdaFunction.Arn,
+  #           RuleFunction: !GetAtt  DMapHealthCareRuleEngineLambdaFunction.Arn
+  #         }
+Outputs:
+  DMapHealthCareProcessingDestBucket:
+    Description: Name of the Destination S3 Bucket
+    Value: 
+      Ref: DMapWorkshopHealthCareDestBucket
+  DMapHealthCareProcessingLambdaFunctionArn:
+    Description: Lambda function to process the incoming json file
+    Value: !GetAtt DMapHealthCareProcessingLambdaFunction.Arn
+  DMapHealthCareRuleEngineLambdaFunctionArn:
+    Description: Lambda function to apply the claim rules
+    Value: !GetAtt DMapHealthCareRuleEngineLambdaFunction.Arn
+  DMapHealthCareDynamoDBTableArn:
+    Description: Dynamodb table to store the claim data
+    Value:
+      Ref: DMapHealthCareDynamoDBTable
+  # HealthcareStateMachineArn:
+  #   Value:
+  #     Ref: HealthCareClaimProcessingStateMachine
