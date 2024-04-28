@@ -1,0 +1,1242 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "Creates a State Machine using Fargate as the processor"
+
+##############################################################
+#
+# PARAMETERS
+#
+##############################################################
+Parameters:
+  Prefix:
+    Type: String
+    Default: 'sfn-fargate'
+    Description: This prefix will be prepended to all resource names
+  
+  DataGenStackName:
+    Type: String
+    Default: 'sfn-datagen'
+    Description: The name of the Data Generation Stack previously created
+
+  VPCCidr:
+    Type: String
+    Default: 10.10.0.0/16
+    Description: The root range for the VPC
+
+  ProcessContainerImage:
+    Type: String
+    Default: public.ecr.aws/amazonlinux/amazonlinux:2023
+    Description: The container image to be used for processing the data
+  
+  ProcessOutputPrefix:
+    Type: String
+    Default: data/processed
+    Description: The prefix to prepend to all processed objects. 
+
+  ProcessConcurrency:
+    Type: Number
+    Default: 100
+    Description: This is the number of concurrent Tasks to run
+  
+  ActivityConcurrency:
+    Type: Number
+    Default: 1000
+    Description: The number of concurrent messages to maintain in the Activity queue
+  
+  ProcessTimeout:
+    Type: Number
+    Default: 180
+    Description: The amount of time, in seconds, before a batch is considered failed or timed out.
+
+  ProcessHeartbeat:
+    Type: Number
+    Default: 60
+    Description: The amount of time, in seconds, before a task is considered stale. 
+
+  ProcessBatchSize:
+    Type: Number
+    Default: 400
+    Description: This is the number of records distributed to each message in the Activity
+
+  ProcessMemory:
+    Type: Number
+    Default: 512
+    Description: This is the amount of memory, in MB, allocated to each Task
+
+  ProcessCPU:
+    Type: Number
+    Default: 256
+    Description: This is the amount of CPU allocated to each Task
+
+  FirstProcessMemory:
+    Type: Number
+    Default: 512
+    Description: This is the amount of memory, in MB, allocated to each Task
+
+  FirstProcessCPU:
+    Type: Number
+    Default: 256
+    Description: This is the amount of CPU allocated to each Task
+
+  LargeProcessMemory:
+    Type: Number
+    Default: 1024
+    Description: This is the amount of memory, in MB, allocated to each Task
+
+  LargeProcessCPU:
+    Type: Number
+    Default: 512
+    Description: This is the amount of CPU allocated to each Task
+  
+  ProcessBatchOutput:
+    Type: String
+    AllowedValues: ['yes', 'no']
+    Default: 'yes'
+    Description: This option enables batch writes vs. 1:1 writes from the processor
+  
+  ProcessSampling:
+    Type: Number
+    Default: 2
+    Description: This enables sampling the dataset where 2 = 1/2, 3 = 1/3, 4 = 1/4, and so on
+  
+  ScriptFeederLambdaTimeout:
+    Type: Number
+    Default: 180
+    Description: The amount of time, in seconds, before the Lambda times out
+
+Resources:
+##############################################################
+#
+# VPC
+#
+##############################################################
+  MainVPC:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VPCCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'vpc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# ROUTING
+#
+##############################################################
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'igw', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  NATGateway:
+   Type: AWS::EC2::NatGateway
+   Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PrimaryPublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'ngw', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MainVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVPC
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'public', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVPC
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'private', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+       RouteTableId: !Ref PublicRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId: !Ref InternetGateway
+
+  DefaultPrivateRoute:
+    DependsOn: NATGateway
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NATGateway
+
+  PrimaryPublicSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrimaryPublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  SecondaryPublicSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecondaryPublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrimaryPrivateSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrimaryPrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  SecondaryPrivateSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecondaryPrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+##############################################################
+#
+# SUBNETS
+#
+##############################################################
+  PrimaryPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: !Select [ 0, !Cidr [ !GetAtt MainVPC.CidrBlock, 4, 12 ]]
+      AvailabilityZone: !Join ['', [!Ref AWS::Region, 'a']]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'ppub', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  SecondaryPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: !Select [ 1, !Cidr [ !GetAtt MainVPC.CidrBlock, 4, 12 ]]
+      AvailabilityZone: !Join ['', [!Ref AWS::Region, 'c']]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'spub', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  PrimaryPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: !Select [ 2, !Cidr [ !GetAtt MainVPC.CidrBlock, 4, 12 ]]
+      AvailabilityZone: !Join ['', [!Ref AWS::Region, 'a']]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'pprv', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  SecondaryPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: !Select [ 3, !Cidr [ !GetAtt MainVPC.CidrBlock, 4, 12 ]]
+      AvailabilityZone: !Join ['', [!Ref AWS::Region, 'c']]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'sprv', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# SECURITY GROUPS
+#
+##############################################################
+  ProcessTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allows access to VPC
+      GroupName: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      VpcId: !Ref MainVPC
+
+##############################################################
+#
+# ADDITIONAL IAM POLICIES
+#
+##############################################################
+  StepFunctionsPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: !Join ['-', [!Ref Prefix, 'sfn-policy', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      RoleName:
+        Fn::ImportValue:
+          !Sub "${DataGenStackName}::StepFunctionsRoleName"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecs:UpdateService
+              - ecs:GetService
+            Resource:
+              - !Ref DataProcessorService
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !Join ['', [!GetAtt InventoryPartitionLambda.Arn, '*']]
+  
+  ECSTaskPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: !Join ['-', [!Ref Prefix, 'ecs-task-policy', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      RoleName: !Ref ECSTaskRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              - !Join ['', [Fn::ImportValue: !Sub "${DataGenStackName}::SourceBucketArn", '*']]
+              - !Join ['', [Fn::ImportValue: !Sub "${DataGenStackName}::DestinationBucketArn", '*']]
+          - Effect: Allow
+            Action:
+              - states:DescribeActivity
+              - states:DeleteActivity
+              - states:GetActivityTask
+              - states:SendTaskHeartbeat
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+            Resource:
+              - !GetAtt FargateActivity.Arn
+
+  ECSExecPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: !Join ['-', [!Ref Prefix, 'ecs-exec-policy', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      RoleName: !Ref ECSExecRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+  
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      Description: Task Role for ECS
+      RoleName: !Join ['-', [!Ref Prefix, 'ecs-task-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'ecs-task-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  ECSExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      Description: Exec Role for ECS
+      RoleName: !Join ['-', [!Ref Prefix, 'ecs-exec-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'ecs-exec-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# LAMBDA FUNCTIONS
+#
+##############################################################
+  FunctionECSRoleCreate:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      InlineCode: |
+        /* Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+        * SPDX-License-Identifier: MIT-0 */
+
+        // A Lambda function that looks up the ECS Service linked role and creates it if it does not exist.
+        var response = require('./cfn-response.js');
+
+        function sleep(ms) {
+          return new Promise((resolve) => {
+            setTimeout(resolve, ms);
+          });
+        }
+
+        function send(event, context, responseStatus, responseData, physicalResourceId, noEcho) {
+            try {
+              const https = require("https");
+              const { URL } = require("url");
+
+              const responseBody = {
+                Status: responseStatus,
+                Reason: "See the details in CloudWatch Log Stream: " + context.logStreamName,
+                PhysicalResourceId: context.logStreamName,
+                StackId: event.StackId,
+                RequestId: event.RequestId,
+                LogicalResourceId: event.LogicalResourceId,
+                NoEcho: false,
+                Data: responseData,
+              };
+              console.log("Response body:\n", JSON.stringify(responseBody));
+
+              const parsedUrl = new URL(event.ResponseURL);
+              const requestOptions = {
+                hostname: parsedUrl.hostname,
+                port: 443,
+                path: parsedUrl.pathname + parsedUrl.search,
+                method: "PUT",
+                headers: {
+                  "content-type": "",
+                  "content-length": JSON.stringify(responseBody).length,
+                },
+              };
+              console.log("Request options:\n", JSON.stringify(requestOptions));
+
+              // Send response back to CloudFormation
+              return new Promise((resolve, reject) => {
+                const request = https.request(requestOptions, function (response) {
+                  console.log("Status code: ", response.statusCode);
+                  response.on("data", () => {});
+                  response.on("end", () => {
+                    console.log("Status code: ", response.statusCode);
+                    console.log("Status message: ", response.statusMessage);
+                    resolve("Success");
+                  });
+                });
+                request.on("error", (e) => {
+                  console.error(e);
+                  reject("Error");
+                });
+                request.write(JSON.stringify(responseBody));
+                request.end();
+              });
+            } catch (error) {
+              console.error("Error in cfn_response:\n", error);
+              return;
+            }
+          };
+
+        exports.handler = async function(event, context) {
+            const { IAMClient, CreateServiceLinkedRoleCommand, GetRoleCommand, NoSuchEntityException } = require("@aws-sdk/client-iam");
+            const iamClient = new IAMClient();
+            var responseStatus = response.SUCCESS
+            var responseData = {};
+            if (event.RequestType == "Delete") {
+                await send(event, context, responseStatus, responseData);
+                return;
+            };
+
+            var params = {
+              AWSServiceName: 'ecs.amazonaws.com', /* required */
+              Description: 'ECS Service Linked Role'
+            };
+            try {
+              const command = new CreateServiceLinkedRoleCommand(params);
+              responseData = await iamClient.send(command);
+            } catch (createError) {
+              // Just logging the error as it does not matter if the role already exists.
+              responseData = createError
+            }
+            await sleep(5000)
+            console.log(responseData);
+            await send(event, context, responseStatus, responseData);
+            return;
+        };
+      Runtime: nodejs18.x
+      MemorySize: 1024
+      Timeout: 300
+      Handler: index.handler
+      Policies:
+        - Statement:
+          - Sid: CreateECSServiceLinkedRole
+            Effect: Allow
+            Action: iam:CreateServiceLinkedRole
+            Resource: "arn:aws:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS*"
+            Condition:
+              StringLike:
+                iam:AWSServiceName: ecs.amazonaws.com
+          - Sid: AttachECSServiceLinkPolicy
+            Effect: Allow
+            Action:
+              - iam:PassRole
+              - iam:PutRolePolicy
+              - iam:GetRole
+            Resource: "arn:aws:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS*"
+
+  InventoryPartitionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'inventorypartition', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Layers:
+        - !Join [':', ['arn:aws:lambda', !Ref AWS::Region, '336392948345', 'layer', 'AWSSDKPandas-Python310:2']]
+      Role:
+        Fn::ImportValue:
+          !Sub "${DataGenStackName}::LambdaRoleArn"
+      Handler: index.lambda_handler
+      MemorySize: !Ref ProcessMemory
+      Timeout: !Ref ScriptFeederLambdaTimeout
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          RECORDCOUNT:
+            Fn::ImportValue:
+              !Sub "${DataGenStackName}::DataSetSize"
+          SOURCEBUCKET:
+            Fn::ImportValue:
+              !Sub "${DataGenStackName}::SourceBucketName"
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import csv
+          import pandas as pd
+          import io
+          import os
+
+          region = os.getenv('REGION')
+          count = os.getenv('RECORDCOUNT')
+          s3_client = boto3.client('s3', region_name=region)
+          s3_resource = boto3.resource('s3')
+
+          def lambda_handler(event, context):
+            bucket_v = event['inventory']['bucket']
+            manifest_key_v = event['inventory']['key']
+            new_manifest_key_prefix = event['inventory']['output_prefix']
+            input_sampling = event['workshop_variables']['input_sampling']
+            original_manifest = s3_client.get_object(Bucket=bucket_v, Key=manifest_key_v)
+            original_manifest_json = json.loads(original_manifest['Body'].read())
+            print(original_manifest_json)
+            bucket = s3_resource.Bucket(bucket_v)
+            df_batch_inventory = pd.DataFrame()
+            output_manifest_manifest = {
+              'files': []
+            }
+            output_manifest_manifest['bucket'] = bucket_v 
+            
+            # Record Counting Variables
+            total_records = 0
+            output_records = 0
+            
+            #If not sampling the input (sampling = 1) then we can just re-write manifest.json files only
+            manifest_counter = 1
+            if input_sampling == 1:
+              for file in original_manifest_json['files']:
+                inventory_manifest = {
+                  'files': []
+                }
+                inventory_manifest['sourceBucket'] = original_manifest_json['sourceBucket']
+                inventory_manifest['destinationBucket'] = original_manifest_json['destinationBucket']
+                inventory_manifest['fileFormat'] = original_manifest_json['fileFormat']
+                inventory_manifest['fileSchema'] = original_manifest_json['fileSchema']
+                inventory_manifest['files'].append({
+                  'key': file['key'],
+                  'size': file['size']
+                })
+                inventory_manifest_json = json.dumps(inventory_manifest)
+                s3_resource.Object(bucket_v, new_manifest_key_prefix + 'manifest--{}.json'.format(manifest_counter)).put(Body=inventory_manifest_json)
+                output_manifest_manifest['files'].append({
+                  'key': new_manifest_key_prefix + 'manifest--{}.json'.format(manifest_counter),
+                  'bucket': bucket_v
+                })
+                manifest_counter += 1
+            #If sampling or filtering the input dataset we will read and process the inventory CVS's and create modified versions for processing        
+            else:
+              im = 1
+              i_files = 1
+              for file in original_manifest_json['files']:
+                obj = s3_resource.Object(bucket_v,file['key'])
+                print(obj.key)
+                obj_data = io.BytesIO(obj.get()['Body'].read())
+                # if file['key'] contains .gz then we are reading the .gz file and not the .csv file
+                if '.gz' in file['key']:
+                  df_temp = pd.read_csv(obj_data, compression='gzip', names=['Bucket', 'Key', 'Size'], header=None)
+                else:
+                  df_temp = pd.read_csv(obj_data, names=['Bucket', 'Key', 'Size'], header=None)
+                total_records += len(df_temp)
+                print("Current observed record count: " + format(total_records))
+                df_batch_inventory = pd.concat([df_batch_inventory,df_temp])
+                if (len(df_batch_inventory) > 250000) or i_files == len(original_manifest_json['files']):
+                  inventory_manifest = {
+                    'files': []
+                  }
+                  inventory_manifest['sourceBucket'] = original_manifest_json['sourceBucket']
+                  inventory_manifest['destinationBucket'] = original_manifest_json['destinationBucket']
+                  inventory_manifest['fileFormat'] = original_manifest_json['fileFormat']
+                  inventory_manifest['fileSchema'] = original_manifest_json['fileSchema']
+                  df_batch_inventory = df_batch_inventory[::input_sampling]
+                  csv_buffer = io.StringIO()
+                  output_records += len(df_batch_inventory)
+                  print("Output records this batch: " + format(len(df_batch_inventory)))
+                  print("Total output records to this point: " + format(output_records))
+                  df_batch_inventory.to_csv(csv_buffer, index=False, header=False)
+                  csv_tmp_name = new_manifest_key_prefix + 'inventory-' + format(im) + '.csv'
+                  s3_resource.Object(bucket_v, csv_tmp_name.format(im)).put(Body=csv_buffer.getvalue())
+                  inventory_manifest['files'].append({
+                    'key': csv_tmp_name,
+                    'size': len(csv_buffer.getvalue())
+                  })
+                  print(inventory_manifest)
+                  inventory_manifest_json = json.dumps(inventory_manifest)
+                  s3_resource.Object(bucket_v, new_manifest_key_prefix + 'manifest--{}.json'.format(im)).put(Body=inventory_manifest_json)
+                  output_manifest_manifest['files'].append({
+                    'key': new_manifest_key_prefix + 'manifest--{}.json'.format(im),
+                    'bucket': bucket_v
+                  })
+                  im += 1
+                  df_batch_inventory = pd.DataFrame(None)
+                i_files += 1
+            return {
+              'statusCode': 200,
+              'body': output_manifest_manifest
+            }
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'inventorypartition', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  DataGenerationTriggerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'datagentrigger', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Role:
+        Fn::ImportValue:
+          !Sub "${DataGenStackName}::LambdaRoleArn"
+      Handler: index.lambda_handler
+      MemorySize: !Ref ProcessMemory
+      Timeout: 900
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          STATEMACHINEARN:
+            Fn::ImportValue:
+              !Sub "${DataGenStackName}::DataGenerationStateMachineArn"
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          import os
+          import time
+          
+          # set a few variables we'll use to get our data
+          region = os.getenv('REGION')
+          state_machine_arn = os.getenv('STATEMACHINEARN')
+
+          client = boto3.client('stepfunctions', region_name=region)
+
+          def lambda_handler(event, context):
+            res = client.start_execution(
+              stateMachineArn = state_machine_arn
+            )
+            while True:
+              state = client.describe_execution(
+                executionArn = res['executionArn']
+              )
+              if state['status'] != 'RUNNING':
+                break
+              else:
+                time.sleep(10)
+
+            responseValue = 0
+            responseData = {}
+            responseData['Data'] = responseValue
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'datagentrigger', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  ScriptFeederLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'scriptfeeder', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Role:
+        Fn::ImportValue:
+          !Sub "${DataGenStackName}::LambdaRoleArn"
+      Handler: index.lambda_handler
+      MemorySize: !Ref ProcessMemory
+      Timeout: !Ref ScriptFeederLambdaTimeout
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          RECORDCOUNT:
+            Fn::ImportValue:
+              !Sub "${DataGenStackName}::DataSetSize"
+          SOURCEBUCKET:
+            Fn::ImportValue:
+              !Sub "${DataGenStackName}::SourceBucketName"
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          import os
+          
+          # set a few variables we'll use to get our data
+          region = os.getenv('REGION')
+          bucket = os.getenv('SOURCEBUCKET')
+
+          s3_client = boto3.client('s3', region_name=region)
+          s3 = boto3.resource('s3')
+
+          def lambda_handler(event, context):
+            body = """#!/usr/bin/python3
+          import boto3
+          import json
+          import csv
+          from io import StringIO
+          import os
+          import time
+          from random import randint
+          from botocore.client import Config
+
+          # set a few variables we'll use to get our data
+          activity_arn = os.getenv('ACTIVITY_ARN')
+          worker_name = os.getenv('HOSTNAME')
+          region = os.getenv('REGION')
+
+          print('starting job...')
+
+          # setup our client
+          config = Config(
+            connect_timeout=65,
+            read_timeout=65,
+            retries={'max_attempts': 0}
+          )
+          client = boto3.client('stepfunctions', region_name=region, config=config)
+          s3_client = boto3.client('s3', region_name=region)
+          s3 = boto3.resource('s3')
+
+          # now we start polling until we have nothing left to do. i realize this should
+          # be more functions and it's pretty gross but it works for a demo :) 
+          while True:
+            response = client.get_activity_task(
+              activityArn = activity_arn,
+              workerName = worker_name
+            )
+
+            if 'input' not in response.keys() or 'taskToken' not in response.keys():
+              print('no tasks to process...waiting 30 seconds to try again')
+              time.sleep(30)
+              continue
+              # break
+
+            token = response['taskToken']
+            data = json.loads(response['input'])
+            items = data['Items']
+            other = data['BatchInput']
+            rndbkt = other['dstbkt'] 
+            success = True
+            cause = ""
+            error = ""
+            results = ["NO", "NO", "NO", "NO", "YES", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO", "NO"]
+            for item in items:
+              try:
+                source = s3_client.get_object(Bucket=other['srcbkt'], Key=item['Key'])
+                content = source.get('Body').read().decode('utf-8')
+                buf = StringIO(content)
+                reader = csv.DictReader(buf)
+                objects = list(reader)
+
+                # just randomly assign a value with a theoretical ballpark of 5% of the values being 'YES'
+                objects[0]['WillDefault'] = results[randint(0,19)]
+
+                stream = StringIO()
+                headers = list(objects[0].keys())
+                writer = csv.DictWriter(stream, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(objects)
+                body = stream.getvalue()
+
+                dst = s3.Object(rndbkt, other['dstkey'] + '/' + item['Key'].split('/')[1])
+                dst.put(Body=body)
+
+              except Exception as e:
+                cause = "failed to process object " + item['Key'],
+                error = str(e)
+                success = False
+                break
+            
+            if success:
+              client.send_task_success(
+                taskToken = token,
+                output = "{\\"message\\": \\"success\\"}"
+              )
+            else:
+              client.send_task_failure(
+                taskToken = token,
+                cause = cause,
+                error = error
+              )"""
+            
+            dst = s3.Object(bucket, 'script/fargate.py')
+            dst.put(Body=body)
+            responseValue = 0
+            responseData = {}
+            responseData['Data'] = responseValue
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'scriptfeeder', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  ScriptFeederLambdaInvoke:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: ScriptFeederLambda
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt ScriptFeederLambda.Arn
+
+  DataGenerationTriggerLambdaInvoke:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: DataGenerationTriggerLambda
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt DataGenerationTriggerLambda.Arn
+
+  CustomResourceECSRoleCreate:
+    Type: 'Custom::ECSRoleCreate'
+    Properties:
+      ServiceToken: !GetAtt FunctionECSRoleCreate.Arn
+
+##############################################################
+#
+# STEP FUNCTIONS ACTIVITY
+#
+##############################################################
+  FargateActivity:
+    Type: "AWS::StepFunctions::Activity"
+    Properties: 
+      Name: !Join ['-', [!Ref Prefix, 'activity', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'activity', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# LOG GROUP
+#
+##############################################################
+  FargateServiceLogGroup: 
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# ECS CLUSTER
+#
+##############################################################
+  DataProcessorECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    DependsOn:
+      - ECSExecPolicy
+      - CustomResourceECSRoleCreate
+      - DefaultPrivateRoute
+    Properties:
+      ClusterName: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - Base: 1
+          CapacityProvider: FARGATE_SPOT
+          Weight: 100
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# ECS TASK DEFINITION AND SERVICE
+#
+##############################################################
+  DataProcessorService:
+    Type: AWS::ECS::Service
+    Properties:
+      CapacityProviderStrategy:
+        - Base: 1
+          CapacityProvider: FARGATE_SPOT
+          Weight: 100
+      Cluster: !Ref DataProcessorECSCluster
+      DesiredCount: 0
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ProcessTaskSecurityGroup
+          Subnets:
+            - !Ref PrimaryPrivateSubnet
+            - !Ref SecondaryPrivateSubnet
+      SchedulingStrategy: REPLICA
+      ServiceName: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      TaskDefinition: !Ref GenericDataProcessorTaskDefinition
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  GenericDataProcessorTaskDefinition: 
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions: 
+        - Command:
+            - /bin/sh
+            - -c
+            - "yum -y update && yum -y install awscli python3-pip && python3 -m pip install boto3 && aws s3 cp s3://${SOURCEBUCKET}/script/fargate.py . && python3 fargate.py"
+          Cpu: !Ref ProcessCPU
+          Environment:
+            - Name: REGION
+              Value: !Ref AWS::Region
+            - Name: ACTIVITY_ARN
+              Value: !GetAtt FargateActivity.Arn
+            - Name: RECORDCOUNT
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::DataSetSize"
+            - Name: SOURCEBUCKET
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::SourceBucketName"
+            - Name: DESTINATIONBUCKET
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::DestinationBucketName"
+          Essential: true
+          Image: !Ref ProcessContainerImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FargateServiceLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref Prefix
+          Memory: !Ref ProcessMemory
+          Name: !Join ['-', [!Ref Prefix, 'dataproc-placeholder', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Cpu: !Ref ProcessCPU
+      ExecutionRoleArn: !Ref ECSExecRole
+      Family: !Join ['-', [!Ref Prefix, 'dataproc-placeholder', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Memory: !Ref ProcessMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !Ref ECSTaskRole
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  FirstDataProcessorTaskDefinition: 
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions: 
+        - Command:
+            - /bin/sh
+            - -c
+            - "yum -y update && yum -y install awscli python3-pip && python3 -m pip install boto3 && aws s3 cp s3://${SOURCEBUCKET}/script/fargate.py . && python3 fargate.py"
+          Cpu: !Ref FirstProcessCPU
+          Environment:
+            - Name: REGION
+              Value: !Ref AWS::Region
+            - Name: ACTIVITY_ARN
+              Value: !GetAtt FargateActivity.Arn
+            - Name: RECORDCOUNT
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::DataSetSize"
+            - Name: SOURCEBUCKET
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::SourceBucketName"
+            - Name: DESTINATIONBUCKET
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::DestinationBucketName"
+          Essential: true
+          Image: !Ref ProcessContainerImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FargateServiceLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref Prefix
+          Memory: !Ref FirstProcessMemory
+          Name: !Join ['-', [!Ref Prefix, 'dataproc-small', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Cpu: !Ref FirstProcessCPU
+      ExecutionRoleArn: !Ref ECSExecRole
+      Family: !Join ['-', [!Ref Prefix, 'dataproc-small', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Memory: !Ref FirstProcessMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !Ref ECSTaskRole
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+  
+  LargeDataProcessorTaskDefinition: 
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions: 
+        - Command:
+            - /bin/sh
+            - -c
+            - "yum -y update && yum -y install awscli python3-pip && python3 -m pip install boto3 && aws s3 cp s3://${SOURCEBUCKET}/script/fargate.py . && python3 fargate.py"
+          Cpu: !Ref LargeProcessCPU
+          Environment:
+            - Name: REGION
+              Value: !Ref AWS::Region
+            - Name: ACTIVITY_ARN
+              Value: !GetAtt FargateActivity.Arn
+            - Name: RECORDCOUNT
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::DataSetSize"
+            - Name: SOURCEBUCKET
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::SourceBucketName"
+            - Name: DESTINATIONBUCKET
+              Value:
+                Fn::ImportValue:
+                  !Sub "${DataGenStackName}::DestinationBucketName"
+          Essential: true
+          Image: !Ref ProcessContainerImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FargateServiceLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref Prefix
+          Memory: !Ref LargeProcessMemory
+          Name: !Join ['-', [!Ref Prefix, 'dataproc-large', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Cpu: !Ref LargeProcessCPU
+      ExecutionRoleArn: !Ref ECSExecRole
+      Family: !Join ['-', [!Ref Prefix, 'dataproc-large', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Memory: !Ref LargeProcessMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !Ref ECSTaskRole
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# STATE MACHINES
+#
+##############################################################
+  DataProcessorStateMachine:xs
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Definition:
+        Comment: A description of my state machine
+        StartAt: Set Example Runtime Properties
+        States:
+          
+          Set Example Runtime Properties:
+            Type: Pass
+            Next: S3 Inventory Partition Step
+            Result:
+              inventory:
+                bucket:
+                  Fn::ImportValue:
+                    !Sub "${DataGenStackName}::SourceBucketName"
+                key: inventory/manifest.json
+                output_prefix: inventory/temp/
+              workshop_variables:
+                output_bucket:
+                  Fn::ImportValue:
+                    !Sub "${DataGenStackName}::DestinationBucketName"
+                output_prefix: output-data
+                batch_output_files: 'yes'
+                input_sampling: 2
+                output_rows_per_file: 50
+          
+          S3 Inventory Partition Step:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !Join [':', [!GetAtt InventoryPartitionLambda.Arn, '$LATEST']]
+              Payload.$: "$"
+            Retry:
+            - ErrorEquals:
+              - Lambda.ServiceException
+              - Lambda.AWSLambdaException
+              - Lambda.SdkClientException
+              - Lambda.TooManyRequestsException
+              IntervalSeconds: 2
+              MaxAttempts: 6
+              BackoffRate: 2
+            Next: Scale Out Workers
+            ResultPath: "$.stepresult"
+            ResultSelector:
+              body.$: "$.Payload.body"
+          
+          Scale Out Workers:
+            Type: Task
+            Next: Inline Map Orchestration
+            Parameters:
+              Service: !Ref DataProcessorService
+              Cluster: !Ref DataProcessorECSCluster
+              DesiredCount: !Ref ProcessConcurrency
+            Resource: arn:aws:states:::aws-sdk:ecs:updateService
+            ResultPath: "$.scaleout"
+            ResultSelector:
+              body.$: "$"
+          
+          Inline Map Orchestration:
+            Type: Map
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
+              StartAt: Distributed Map Data Processing
+              States:
+                Distributed Map Data Processing:
+                  Type: Map
+                  ItemProcessor:
+                    ProcessorConfig:
+                      Mode: DISTRIBUTED
+                      ExecutionType: STANDARD
+                    StartAt: Step Functions Run Activity
+                    States:
+                      Step Functions Run Activity:
+                        Type: Task
+                        Resource: !Ref FargateActivity
+                        TimeoutSeconds: !Ref ProcessTimeout
+                        End: true
+                        Retry:
+                        - ErrorEquals:
+                          - States.TaskFailed
+                          - States.Timeout
+                          - 'An error occurred (SlowDown) when calling the PutObject operation (reached
+                            max retries: 4): Please reduce your request rate.'
+                          BackoffRate: 2
+                          IntervalSeconds: 30
+                          MaxAttempts: 3
+                        HeartbeatSeconds: !Ref ProcessHeartbeat
+                  ItemReader:
+                    Resource: arn:aws:states:::s3:getObject
+                    ReaderConfig:
+                      InputType: MANIFEST
+                      MaxItems: 0
+                    Parameters:
+                      Bucket.$: "$.key.bucket"
+                      Key.$: "$.key.key"
+                  MaxConcurrency: !Ref ActivityConcurrency
+                  Label: S3objectkeys
+                  ItemBatcher:
+                    BatchInput:
+                      srcbkt:
+                        Fn::ImportValue:
+                          !Sub "${DataGenStackName}::SourceBucketName"
+                      dstbkt:
+                        Fn::ImportValue:
+                          !Sub "${DataGenStackName}::DestinationBucketName"
+                      dstkey: !Ref ProcessOutputPrefix
+                    MaxItemsPerBatch: !Ref ProcessBatchSize
+                  ResultWriter:
+                    Resource: arn:aws:states:::s3:putObject
+                    Parameters:
+                      Bucket:
+                        Fn::ImportValue:
+                          !Sub "${DataGenStackName}::DestinationBucketName"
+                      Prefix: !Sub "${Prefix}-dmap-results"
+                  End: true
+            Next: Destroy Workers
+            ItemsPath: "$.stepresult.body.files"
+            MaxConcurrency: 2
+            ItemSelector:
+              workshop_variables.$: "$.workshop_variables"
+              key.$: "$$.Map.Item.Value"
+          
+          Destroy Workers:
+            Type: Task
+            Parameters:
+              Service: !Ref DataProcessorService
+              Cluster: !Ref DataProcessorECSCluster
+              DesiredCount: 0
+            Resource: arn:aws:states:::aws-sdk:ecs:updateService
+            End: true
+      
+      RoleArn:
+        Fn::ImportValue:
+          !Sub "${DataGenStackName}::StepFunctionsRoleArn"
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'dataproc', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# OUTPUTS
+#
+##############################################################
+Outputs:
+  DataProcessorStateMachineArn:
+    Description: DataProcessorStateMachine ARN
+    Value: !GetAtt DataProcessorStateMachine.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::DataProcessorStateMachineArn"

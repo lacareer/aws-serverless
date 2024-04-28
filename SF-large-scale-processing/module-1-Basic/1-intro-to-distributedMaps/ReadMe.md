@@ -35,7 +35,7 @@ Deploy the template.yaml using cloudformation
         }
 
 # ItemReader in the definition
-This is how you tell distributed map to process a csv or JSON file. Notice that the reader uses the s3.getObject API to read the object. Yes! It reads the content of the csv file and distributes the data to child workflows in batches, running at a concurrency of 10,000!
+This is how you tell distributed map to process a csv or JSON file. Notice that the reader uses the s3.getObject ( because we are reading jsut a singlr s3 object/file. To read multiple files use: arn:aws:states:::s3:listObjectsV2 ) API to read the object. Yes! It reads the content of the csv file and distributes the data to child workflows in batches, running at a concurrency of 10,000!
 
                 "MaxConcurrency": 10000,
                 "ItemReader": {

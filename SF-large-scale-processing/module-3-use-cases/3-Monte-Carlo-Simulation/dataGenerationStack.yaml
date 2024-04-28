@@ -1,0 +1,723 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Creates a Data Set for use with Sample Stacks"
+
+##############################################################
+#
+# PARAMETERS
+#
+##############################################################
+Parameters:
+  Prefix:
+    Type: String
+    Default: 'sfn-datagen'
+    Description: This prefix will be prepended to all resource names
+
+  DataSetSize:
+    Type: Number
+    Default: 500000
+    Description: The number of records to generate for processing
+
+  SeedFileGenerationLambdaMemory:
+    Type: Number
+    Default: 2048
+    Description: This is the amount of memory, in MB, allocated the Lambda Function
+
+  SeedFileGenerationLambdaTimeout:
+    Type: Number
+    Default: 180
+    Description: This is the amount of time, in seconds, before the Lambda Function times out
+
+  DataGenerationLambdaMemory:
+    Type: Number
+    Default: 128
+    Description: This is the amount of memory, in MB, allocated the Lambda Function
+
+  DataGenerationLambdaTimeout:
+    Type: Number
+    Default: 300
+    Description: This is the amount of time, in seconds, before the Lambda Function times out
+
+  InventoryLambdaMemory:
+    Type: Number
+    Default: 512
+    Description: This is the amount of memory, in MB, allocated the Lambda Function
+
+  InventoryLambdaTimeout:
+    Type: Number
+    Default: 180
+    Description: This is the amount of time, in seconds, before the Lambda Function times out
+
+  ManifestLambdaMemory:
+    Type: Number
+    Default: 512
+    Description: This is the amount of memory, in MB, allocated the Lambda Function
+
+  ManifestLambdaTimeout:
+    Type: Number
+    Default: 180
+    Description: This is the amount of time, in seconds, before the Lambda Function times out
+
+Resources:
+##############################################################
+#
+# S3 Buckets for lambda functions, source and destionation data
+#
+##############################################################
+  MonteCarloSourceBucket:
+    Type: AWS::S3::Bucket
+
+  MonteCarloDestinationBucket:
+    Type: AWS::S3::Bucket
+
+##############################################################
+#
+# IAM ROLES
+#
+##############################################################
+  StepFunctionsPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: !Join ['-', [!Ref Prefix, 'sfn-policy', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      RoleName: !Ref StepFunctionsRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+              - states:DescribeExecution
+              - states:StopExecution
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - events:PutTargets
+              - events:PutRule
+              - events:DescribeRule
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              - !Join ['', [!GetAtt MonteCarloSourceBucket.Arn, '*']]
+              - !Join ['', [!GetAtt MonteCarloDestinationBucket.Arn, '*']]
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !Join ['', [!GetAtt SeedFileGenerationLambda.Arn, '*']]
+              - !Join ['', [!GetAtt DataGenerationLambda.Arn, '*']]
+              - !Join ['', [!GetAtt InventoryLambda.Arn, '*']]
+              - !Join ['', [!GetAtt ManifestLambda.Arn, '*']]
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      Description: Step Functions Role
+      RoleName: !Join ['-', [!Ref Prefix, 'sfn-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'sfn-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  LambdaPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: !Join ['-', [!Ref Prefix, 'lambda-policy', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      RoleName: !Ref LambdaRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+              - states:DescribeExecution
+              - states:StopExecution
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              - !Join ['', [!GetAtt MonteCarloSourceBucket.Arn, '*']]
+              - !Join ['', [!GetAtt MonteCarloDestinationBucket.Arn, '*']]
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      Description: Lambda Role reused by all Lambda Functions in Stack
+      RoleName: !Join ['-', [!Ref Prefix, 'lambda-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'lambda-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# LAMBDA FUNCTIONS
+#
+##############################################################
+  SeedFileGenerationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'seedgen', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Role: !GetAtt LambdaRole.Arn
+      Handler: index.lambda_handler
+      MemorySize: !Ref SeedFileGenerationLambdaMemory
+      Timeout: !Ref SeedFileGenerationLambdaTimeout
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          RECORDCOUNT: !Ref DataSetSize
+      Code:
+        ZipFile: |
+          import boto3
+          import csv
+          from io import StringIO
+          import os
+
+          region = os.getenv('REGION')
+          count = os.getenv('RECORDCOUNT')
+          s3_client = boto3.client('s3', region_name=region)
+          s3 = boto3.resource('s3')
+
+          def lambda_handler(event, context):
+            data = []
+            for i in range(1, (int(count) + 1)):
+              data.append({
+                'num': i
+              })
+
+            stream = StringIO()
+            headers = list(data[0].keys())
+            writer = csv.DictWriter(stream, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(data)
+            body = stream.getvalue()
+
+            ## Writes to the sfn-datagen bucket
+            dst = s3.Object(event['bucket'], 'inventory/numbers.csv')
+            dst.put(Body=body)
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'seedgen', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  DataGenerationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'datagen', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Role: !GetAtt LambdaRole.Arn
+      Handler: index.lambda_handler
+      MemorySize: !Ref DataGenerationLambdaMemory
+      Timeout: !Ref DataGenerationLambdaTimeout
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          RECORDCOUNT: !Ref DataSetSize
+      Code:
+        ZipFile: |
+          import boto3
+          import csv
+          from random import uniform, randrange, randint
+          from datetime import datetime, timedelta
+          from io import StringIO
+          import os
+
+          region = os.getenv('REGION')
+          count = os.getenv('RECORDCOUNT')
+          s3_client = boto3.client('s3', region_name=region)
+          s3 = boto3.resource('s3')
+          terms = [12, 24, 36, 48, 60, 72, 84, 96, 108, 120]
+          term = terms[randint(0,9)]
+          end = datetime.now()
+          start = end - timedelta(days=((term / 12) * 365))
+
+          def random_date(start, end):
+            delta = end - start
+            int_delta = (delta.days * 24 * 60 * 60) + delta.seconds
+            random_second = randrange(int_delta)
+            return start + timedelta(seconds=random_second)
+        
+          def get_zeroes(current, total):
+            x = total - len(str(current))
+            ret = ""
+            for i in range(0, x):
+              ret = ret + "0"
+            return ret + str(current)
+
+          def lambda_handler(event, context):
+            batch = []
+            length = len(str(count))
+            first = get_zeroes(event['Items'][0]['num'], length)
+            last = get_zeroes(event['Items'][len(event['Items']) - 1]['num'], length)
+            for item in event['Items']:
+              data = [{
+                'AccountID': randint(1000000,9999999),
+                'ZipCode': randint(10000,99999),
+                'Rate': round(uniform(1.0,9.9), 2),
+                'Payment': randint(1000,10000),
+                'LoanAmount': randint(10000,10000000),
+                'LoanTerm': term,
+                'OriginationDate': random_date(start, end).strftime('%m/%d/%Y'),
+                'GrossIncome': randint(50000,5000000)
+              }]
+
+              stream = StringIO()
+              headers = list(data[0].keys())
+              writer = csv.DictWriter(stream, fieldnames=headers)
+              writer.writeheader()
+              writer.writerows(data)
+              body = stream.getvalue()
+
+              number = get_zeroes(item['num'], length)
+
+              ## Writes to the sfn-datagen bucket in data directory
+              dst = s3.Object(event['BatchInput']['bucket'], 'data/data-gen-' + str(number) + '.csv')
+              dst.put(Body=body)
+
+              batch.append({
+                'Key': 'data/data-gen-' + number + '.csv',
+                'Size': len(body.encode('utf-8'))
+              })
+            
+            stream = StringIO()
+            headers = list(batch[0].keys())
+            writer = csv.DictWriter(stream, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(batch)
+            body = stream.getvalue()
+
+            ## Writes to the sfn-datagen bucket in temp directory
+            dst = s3.Object(event['BatchInput']['bucket'], 'temp/data-batch-' + str(first) + '-' + str(last) + '.csv')
+            dst.put(Body=body)
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'datagen', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  InventoryLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'inventory', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Role: !GetAtt LambdaRole.Arn
+      Handler: index.lambda_handler
+      MemorySize: !Ref InventoryLambdaMemory
+      Timeout: !Ref InventoryLambdaTimeout
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          RECORDCOUNT: !Ref DataSetSize
+      Code:
+        ZipFile: |
+          import boto3
+          import csv
+          import gzip
+          from io import StringIO
+          from io import BytesIO
+          from botocore.client import Config
+          import os
+
+          # set a few variables we'll use to get our data
+          region = os.getenv('REGION')
+          count = os.getenv('RECORDCOUNT')
+          s3_client = boto3.client('s3', region_name=region)
+          s3 = boto3.resource('s3')
+        
+          def get_zeroes(current, total):
+            x = total - len(str(current))
+            ret = ""
+            for i in range(0, x):
+              ret = ret + "0"
+            return ret + str(current)
+
+          def lambda_handler(event, context):
+            data = []
+            length = len(str(count))
+            start = 0
+            end = 0
+            for x in range(0, len(event['Items'])):
+              source = s3_client.get_object(Bucket=event['BatchInput']['bucket'], Key=event['Items'][x]['Key'])
+              content = source.get('Body').read().decode('utf-8')
+              buf = StringIO(content)
+              reader = csv.DictReader(buf)
+              objects = list(reader)
+            
+              for item in objects:
+                start = int(item['Key'].split('-')[2].replace('.csv','')) if int(item['Key'].split('-')[2].replace('.csv','')) < int(start) or int(start) == 0 else int(start)
+                end = int(item['Key'].split('-')[2].replace('.csv','')) if int(item['Key'].split('-')[2].replace('.csv','')) > int(end) else int(end)
+                data.append({
+                  'Bucket': event['BatchInput']['bucket'],
+                  'Key': item['Key'],
+                  'Size': item['Size']
+                })
+
+            mem = BytesIO()
+            with gzip.GzipFile(fileobj=mem, mode='w') as gz:
+              stream = StringIO()
+              headers = list(data[0].keys())
+              writer = csv.DictWriter(stream, fieldnames=headers)
+              writer.writerows(data)
+
+              gz.write(stream.getvalue().encode())
+              gz.close()
+              mem.seek(0)
+
+            s3_client.upload_fileobj(Fileobj=mem, Bucket=event['BatchInput']['bucket'], Key='inventory/data-gen-' + str(get_zeroes(start, length)) + '-' + str(get_zeroes(end, length)) + '.csv.gz')
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'inventory', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+  ManifestLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ['-', [!Ref Prefix, 'manifest', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Runtime: python3.10
+      Role: !GetAtt LambdaRole.Arn
+      Handler: index.lambda_handler
+      MemorySize: !Ref ManifestLambdaMemory
+      Timeout: !Ref ManifestLambdaTimeout
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          RECORDCOUNT: !Ref DataSetSize
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          from datetime import datetime
+          import time
+
+          s3_client = boto3.client("s3")
+          s3 = boto3.resource("s3")
+
+          def lambda_handler(event, context):
+            files = []
+            for item in event['Items']:
+              files.append({
+                "key": item['Key'],
+                "size": item['Size'],
+                "MD5checksum": item['Etag'].replace('"','')
+              })
+            manifest = {
+              "sourceBucket" : event['BatchInput']['bucket'],
+              "destinationBucket" : "arn:aws:s3:::" + event['BatchInput']['bucket'],
+              "version" : "2016-11-30",
+              "creationTimestamp" : time.mktime(datetime.now().timetuple()),
+              "fileFormat" : "CSV",
+              "fileSchema" : "Bucket, Key, Size",
+              "files" : files
+            }
+            dst = s3.Object(event['BatchInput']['bucket'], 'inventory/manifest.json')
+            dst.put(Body=(bytes(json.dumps(manifest).encode('UTF-8'))))
+      Tags: 
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'manifest', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# STATE MACHINES
+#
+##############################################################
+#-Data Generation State Machine-------------------------------
+  DataGenerationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Join ['-', [!Ref Prefix, 'datagen', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+      Definition:
+        Comment: Data Generation State Machine
+        StartAt: Seed File Generation
+        States:
+          Seed File Generation:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            OutputPath: "$.Payload"
+            Parameters:
+              Payload:
+                bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+              FunctionName: !Join [':', [!GetAtt SeedFileGenerationLambda.Arn, '$LATEST']]
+            Retry:
+            - ErrorEquals:
+              - Lambda.ServiceException
+              - Lambda.AWSLambdaException
+              - Lambda.SdkClientException
+              - Lambda.TooManyRequestsException
+              IntervalSeconds: 2
+              MaxAttempts: 6
+              BackoffRate: 2
+            Next: File Generation DMap
+          
+          File Generation DMap:
+            Type: Map
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: DISTRIBUTED
+                ExecutionType: STANDARD
+              StartAt: File Generation
+              States:
+                File Generation:
+                  Type: Task
+                  Resource: arn:aws:states:::lambda:invoke
+                  OutputPath: "$.Payload"
+                  Parameters:
+                    Payload.$: "$"
+                    FunctionName: !Join [':', [!GetAtt DataGenerationLambda.Arn, '$LATEST']]
+                  Retry:
+                  - ErrorEquals:
+                    - Lambda.ServiceException
+                    - Lambda.AWSLambdaException
+                    - Lambda.SdkClientException
+                    - Lambda.TooManyRequestsException
+                    IntervalSeconds: 2
+                    MaxAttempts: 6
+                    BackoffRate: 2
+                  End: true
+            ItemReader:
+              Resource: arn:aws:states:::s3:getObject
+              ReaderConfig:
+                InputType: CSV
+                CSVHeaderLocation: FIRST_ROW
+              Parameters:
+                Bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+                Key: inventory/numbers.csv
+            MaxConcurrency: 100
+            Label: FileGenerationDMap
+            ItemBatcher:
+              MaxItemsPerBatch: 1000
+              BatchInput:
+                bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+            ResultWriter:
+              Resource: arn:aws:states:::s3:putObject
+              Parameters:
+                Bucket: !Select [5, !Split [':', !GetAtt MonteCarloDestinationBucket.Arn]]
+                Prefix: !Join ['-', [!Ref Prefix, 'datagen', 'results']]
+            Next: Inventory Generation DMap
+          
+          Inventory Generation DMap:
+            Type: Map
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: DISTRIBUTED
+                ExecutionType: STANDARD
+              StartAt: Inventory Generation
+              States:
+                Inventory Generation:
+                  Type: Task
+                  Resource: arn:aws:states:::lambda:invoke
+                  OutputPath: "$.Payload"
+                  Parameters:
+                    Payload.$: "$"
+                    FunctionName: !Join [':', [!GetAtt InventoryLambda.Arn, '$LATEST']]
+                  Retry:
+                  - ErrorEquals:
+                    - Lambda.ServiceException
+                    - Lambda.AWSLambdaException
+                    - Lambda.SdkClientException
+                    - Lambda.TooManyRequestsException
+                    IntervalSeconds: 2
+                    MaxAttempts: 6
+                    BackoffRate: 2
+                  End: true
+            ItemReader:
+              Parameters:
+                Bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+                Prefix: "temp/data-batch-"
+              Resource: arn:aws:states:::s3:listObjectsV2
+            MaxConcurrency: 100
+            Label: InventoryGenerationDMap
+            ItemBatcher:
+              MaxItemsPerBatch: 100
+              BatchInput:
+                bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+            ResultWriter:
+              Resource: arn:aws:states:::s3:putObject
+              Parameters:
+                Bucket: !Select [5, !Split [':', !GetAtt MonteCarloDestinationBucket.Arn]]
+                Prefix: !Join ['-', [!Ref Prefix, 'inventory', 'results']]
+            Next: Manifest Generation DMap
+          
+          Manifest Generation DMap:
+            Type: Map
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: DISTRIBUTED
+                ExecutionType: STANDARD
+              StartAt: Manifest Generation
+              States:
+                Manifest Generation:
+                  Type: Task
+                  Resource: arn:aws:states:::lambda:invoke
+                  OutputPath: "$.Payload"
+                  Parameters:
+                    Payload.$: "$"
+                    FunctionName: !Join [':', [!GetAtt ManifestLambda.Arn, '$LATEST']]
+                  Retry:
+                  - ErrorEquals:
+                    - Lambda.ServiceException
+                    - Lambda.AWSLambdaException
+                    - Lambda.SdkClientException
+                    - Lambda.TooManyRequestsException
+                    IntervalSeconds: 2
+                    MaxAttempts: 6
+                    BackoffRate: 2
+                  End: true
+            ItemReader:
+              Resource: arn:aws:states:::s3:listObjectsV2
+              Parameters:
+                Bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+                Prefix: inventory/data-gen-
+            MaxConcurrency: 1
+            Label: ManifestGenerationDMap
+            ItemBatcher:
+              MaxItemsPerBatch: 1000
+              BatchInput:
+                bucket: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+            ResultWriter:
+              Resource: arn:aws:states:::s3:putObject
+              Parameters:
+                Bucket: !Select [5, !Split [':', !GetAtt MonteCarloDestinationBucket.Arn]]
+                Prefix: !Join ['-', [!Ref Prefix, 'manifest', 'results']]
+            End: true
+      
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref Prefix, 'datagen', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+
+##############################################################
+#
+# OUTPUTS
+#
+##############################################################
+Outputs:
+  SourceBucketName:
+    Description: Source Bucket Name
+    Value: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+    Export:
+      Name: !Sub "${AWS::StackName}::SourceBucketName"
+
+  SourceBucketArn:
+    Description: Source Bucket ARN
+    Value: !GetAtt MonteCarloSourceBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::SourceBucketArn"
+  
+  DestinationBucketName:
+    Description: Destination Bucket Name
+    Value: !Select [5, !Split [':', !GetAtt MonteCarloSourceBucket.Arn]]
+    Export:
+      Name: !Sub "${AWS::StackName}::DestinationBucketName"
+  
+  DestinationBucketArn:
+    Description: Destination Bucket ARN
+    Value: !GetAtt MonteCarloSourceBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::DestinationBucketArn"
+  
+  DataGenerationStateMachine:
+    Description: DataGenerationStateMachine ARN
+    Value: !GetAtt DataGenerationStateMachine.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::DataGenerationStateMachineArn"
+  
+  LambdaRoleName:
+    Description: Reusable Lambda Role Name
+    Value: !Join ['-', [!Ref Prefix, 'lambda-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+    Export:
+      Name: !Sub "${AWS::StackName}::LambdaRoleName"
+  
+  LambdaRoleArn:
+    Description: Reusable Lambda Role ARN
+    Value: !GetAtt LambdaRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::LambdaRoleArn"
+  
+  StepFunctionsRoleName:
+    Description: Step Functions Role Name
+    Value: !Join ['-', [!Ref Prefix, 'sfn-role', !Select [7, !Split ['-', !Ref AWS::StackId]]]]
+    Export:
+      Name: !Sub "${AWS::StackName}::StepFunctionsRoleName"
+  
+  StepFunctionsRoleArn:
+    Description: Step Functions Role ARN
+    Value: !GetAtt StepFunctionsRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::StepFunctionsRoleArn"
+  
+  SeedFileGenerationLambdaArn:
+    Description: SeedFileGenerationLambda ARN
+    Value: !GetAtt SeedFileGenerationLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::SeedFileGenerationLambdaArn"
+  
+  DataGenerationLambdaArn:
+    Description: DataGenerationLambda ARN
+    Value: !GetAtt DataGenerationLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::DataGenerationLambdaArn"
+  
+  InventoryLambdaArn:
+    Description: InventoryLambda ARN
+    Value: !GetAtt InventoryLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::InventoryLambdaArn"
+  
+  ManifestLambdaArn:
+    Description: ManifestLambda ARN
+    Value: !GetAtt ManifestLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}::ManifestLambdaArn"
+
+  DataSetSize:
+    Description: Number of records created
+    Value: !Ref DataSetSize
+    Export:
+      Name: !Sub "${AWS::StackName}::DataSetSize"
