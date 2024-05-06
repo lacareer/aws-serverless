@@ -1,4 +1,8 @@
-# Cloudformation custom resources
+<!-- workshop link -->
+
+# # https://catalog.us-east-1.prod.workshops.aws/workshops/2a22e604-2f2e-4d7b-85a8-33b38c999234/en-US
+
+ <!-- Cloudformation custom resources -->
 
 Note that some/all of the cloudformation templates are using custom resources. This is to make sure the associated lambda runs each time when the stack is created, updated or deleted. This makes sure the S3 buckets contains the required files/data when the stack is deployed initially and updates the content when the stack is updated.
 

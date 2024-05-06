@@ -9,6 +9,7 @@ Description: "Creates a State Machine using Fargate as the processor"
 #
 ##############################################################
 Parameters:
+
   Prefix:
     Type: String
     Default: 'sfn-fargate'
