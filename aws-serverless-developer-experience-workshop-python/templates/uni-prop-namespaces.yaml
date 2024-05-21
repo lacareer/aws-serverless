@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Global namespaces for Unicorn Properties applications and services. Deploy with shared infrastructure.
+
+Resources:
+
+  UnicornContractsNamespaceParam: 
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /uni-prop/UnicornContractsNamespace
+      Value: "unicorn.contracts"
+
+  UnicornPropertiesNamespaceParam: 
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /uni-prop/UnicornPropertiesNamespace
+      Value: "unicorn.properties"
+
+  UnicornWebNamespaceParam: 
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /uni-prop/UnicornWebNamespace
+      Value: "unicorn.web"
+
+  
+Outputs:
+
+  UnicornContractsNamespaceName:
+    Description: Unicorn Contracts namespace parameter
+    Value: !Ref UnicornContractsNamespaceParam
+
+  UnicornPropertiesNamespaceName:
+    Description: Unicorn Properties namespace parameter
+    Value: !Ref UnicornPropertiesNamespaceParam
+
+  UnicornWebNamespaceName:
+    Description: Unicorn Web namespace parameter
+    Value: !Ref UnicornWebNamespaceParam
+
+  UnicornContractsNamespaceValue:
+    Description: Unicorn Contracts namespace parameter value
+    Value: !GetAtt UnicornContractsNamespaceParam.Value
+
+  UnicornPropertiesNamespaceValue:
+    Description: Unicorn Properties namespace parameter value
+    Value: !GetAtt UnicornPropertiesNamespaceParam.Value
+
+  UnicornWebNamespaceValue:
+    Description: Unicorn Web namespace parameter value
+    Value: !GetAtt UnicornWebNamespaceParam.Value
