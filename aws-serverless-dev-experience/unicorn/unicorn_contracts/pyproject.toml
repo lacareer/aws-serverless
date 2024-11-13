@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "contracts_service"
+version = "0.2.0"
+description = "Unicorn Properties Contact Service"
+authors = ["Amazon Web Services"]
+packages = [{ include = "contracts_service", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+boto3 = "^1.35.14"
+aws-lambda-powertools = {extras = ["tracer"], version = "^3.2.0"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.2"
+requests = "^2.32.3"
+moto = {version = "^5.0.14", extras = ["dynamodb", "events", "sqs"]}
+importlib-metadata = "^8.4.0"
+pyyaml = "^6.0.2"
+arnparse = "^0.0.2"
+poetry-plugin-export = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -vv -W ignore::UserWarning"
+testpaths = ["tests/unit", "tests/integration"]
+
+[tool.ruff]
+line-length = 150
