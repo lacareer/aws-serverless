@@ -1,0 +1,7 @@
+# coding: utf-8
+
+from __future__ import absolute_import
+
+from schema.unicorn_properties_local.publicationevaluationcompleted.marshaller import Marshaller
+from schema.unicorn_properties_local.publicationevaluationcompleted.AWSEvent import AWSEvent
+from schema.unicorn_properties_local.publicationevaluationcompleted.PublicationEvaluationCompleted import PublicationEvaluationCompleted
