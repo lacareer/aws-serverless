@@ -12,10 +12,11 @@ Let resolve these using open source cli tools and libraries built and maintained
     sudo npm install -g @mhlabs/iam-policies-cli
     sudo npm install -g @mhlabs/evb-cli
 
-# DID NOT FULLY UNDERSTAND THE USE OF THE MHLABS PACKAGES BELOW AND HAD TO COPY THE POLICIES AND RULES FROM THE COMPLATED CODE 
 Using the https://github.com/mhlabs , read more about the usage    
 
 
+# DID NOT FULLY UNDERSTAND THE USE OF THE MHLABS PACKAGES BELOW AND HAD TO COPY THE POLICIES AND RULES FROM THE COMPLETED CODE 
+# REFER TO README-5 FIL FOR MORE ON THIS PACKAGES
 <!-- Creating the IAM policies for the ContractStatusChangedHandler function    -->
 Your goal to create two policies to define a permissions target for DynamoDB. Create policies for both DynamoDBReadPolicy 
 and DynamoDBWritePolicy for the ContractStatusTable. Run:

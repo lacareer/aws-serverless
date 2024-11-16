@@ -89,7 +89,9 @@ Resources:
         - DynamoDBWritePolicy:
             TableName: !Ref ContractStatusTable
         - DynamoDBReadPolicy:
-            TableName: !Ref ContractStatusTable        
+            TableName: !Ref ContractStatusTable 
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt PropertiesServiceDLQ.QueueName       
       Events:
         StatusChangedEvent:
           Type: EventBridgeRule
@@ -228,7 +230,7 @@ Resources:
     Properties:
       Name: !Sub "${AWS::StackName}-ApprovalStateMachine"
       DefinitionUri: state_machine/property_approval.asl.yaml
-      Policies:
+      Policies:      
         - AWSXRayDaemonWriteAccess
         - ComprehendBasicAccessPolicy: {}
         - RekognitionDetectOnlyPolicy: {}
@@ -255,16 +257,42 @@ Resources:
                 - logs:DescribeLogGroups
                 - cloudwatch:PutMetricData
               Resource: "*"
+            # - Effect: Allow
+            #   # Principal: 
+            #   #   Service: states.amazonaws.com
+            #   Action:
+            #     - sts:AssumeRole
+            #   Resource: "*"
       Logging:
         Destinations:
           - CloudWatchLogsLogGroup:
               LogGroupArn: !GetAtt ApprovalStateMachineLogGroup.Arn
         Level: ALL
         IncludeExecutionData: true
-      # Events:
-      #   # Add your EventBridgeRule event source here
-      # DefinitionSubstitutions:
-      #   # Add your Step Function definition substitutions here
+      Events:
+        PublicationApprovalRequestedEvent:
+          Type: EventBridgeRule
+          Properties:
+            RuleName: unicorn.properties-PublicationApprovalRequested
+            EventBusName: !GetAtt UnicornPropertiesEventBus.Name
+            Pattern:
+              source:
+                - "{{resolve:ssm:/uni-prop/UnicornWebNamespace}}"
+              detail-type:
+                - PublicationApprovalRequested
+            RetryPolicy:
+              MaximumRetryAttempts: 5
+              MaximumEventAgeInSeconds: 900
+            DeadLetterConfig:
+              Type: SQS
+              Destination: !GetAtt PropertiesServiceDLQ.Arn
+      DefinitionSubstitutions:
+        ContractExistsChecker: !GetAtt ContractExistsCheckerFunction.Arn
+        WaitForContractApproval: !GetAtt WaitForContractApprovalFunction.Arn
+        ContentIntegrityValidator: !GetAtt ContentIntegrityValidatorFunction.Arn
+        ImageUploadBucketName: !Sub "{{resolve:ssm:/uni-prop/${Stage}/ImagesBucket}}"
+        EventBusName: !GetAtt UnicornPropertiesEventBus.Name
+        ServiceName: "{{resolve:ssm:/uni-prop/UnicornPropertiesNamespace}}"      
 
   # Store ApprovalStateMachineLogGroup workflow execution logs
   ApprovalStateMachineLogGroup:

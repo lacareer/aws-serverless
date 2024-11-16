@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-
+from schema.unicorn_contracts_local.contractstatuschanged import (AWSEvent, ContractStatusChanged, Marshaller)
 import os
 from datetime import datetime
 
@@ -42,6 +42,9 @@ def lambda_handler(event, context):
     """
     # Deserialize event into strongly typed object
 
+    #Deserialize event into strongly typed object
+    awsEvent:AWSEvent = Marshaller.unmarshall(event, AWSEvent)
+    detail:ContractStatusChanged = awsEvent.detail
     save_contract_status(detail)
 
     # return OK, async function
