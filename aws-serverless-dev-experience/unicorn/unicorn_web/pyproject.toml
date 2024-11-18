@@ -14,6 +14,7 @@ python = "^3.10"
 boto3 = "^1.35.14"
 requests = "^2.32.3"
 crhelper = "^2.0.11"
+aws-lambda-powertools = {extras = ["tracer"], version = "^3.3.0"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"

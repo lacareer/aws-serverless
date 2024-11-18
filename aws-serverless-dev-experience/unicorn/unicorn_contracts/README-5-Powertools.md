@@ -35,4 +35,4 @@ Powertools is a flexible module that can be implemented to meet your needs for t
 2- Tracing
 3- Cold start metrics
 
-Below are some code snippets to help you get started:        
+Below are some code snippets to help you get started:   https://catalog.workshops.aws/serverless-developer-experience/en-US/unicorn-contracts/power-up     

@@ -6,6 +6,13 @@ import re
 
 import boto3
 
+from aws_lambda_powertools.logging import Logger
+from aws_lambda_powertools.tracing import Tracer
+from aws_lambda_powertools.metrics import Metrics, MetricUnit
+from aws_lambda_powertools.event_handler.exceptions import InternalServerError
+
+from schema.unicorn_properties_local.publicationevaluationcompleted import (AWSEvent, Marshaller, PublicationEvaluationCompleted)
+
 
 # Initialise Environment variables
 if (SERVICE_NAMESPACE := os.environ.get('SERVICE_NAMESPACE')) is None:
@@ -18,16 +25,23 @@ if (EVENT_BUS := os.environ.get('EVENT_BUS')) is None:
 EXPRESSION = r"[a-z-]+\/[a-z-]+\/[a-z][a-z0-9-]*\/[0-9-]+"
 TARGET_STATE = 'PENDING'
 
+# Initialise PowerTools
+logger: Logger = Logger()
+tracer: Tracer = Tracer()
+metrics: Metrics = Metrics()
+
 # Initialise boto3 clients
+
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(DYNAMODB_TABLE)  # type: ignore
 
 
+@tracer.capture_method
 def get_keys_for_property(property_id: str) -> Tuple[str, str]:
     # Validate Property ID
     if not re.fullmatch(EXPRESSION, property_id):
         error_msg = f"Invalid property id '{property_id}'; must conform to regular expression: {EXPRESSION}"
-        print(error_msg)
+        logger.error(error_msg)
         return '', ''
 
     # Extract components from property_id
@@ -40,6 +54,7 @@ def get_keys_for_property(property_id: str) -> Tuple[str, str]:
     return pk, sk
 
 
+@tracer.capture_method
 def publication_approved(event_detail, errors):
     """Add new property to database; responds to HTTP POST with JSON payload; generates DynamoDB structure
 
@@ -52,7 +67,7 @@ def publication_approved(event_detail, errors):
     -------
     Success message upon successful storage of the approval outcome into DynamoDB
     """
-    print(event_detail)
+    logger.info(event_detail)
 
     property_id = event_detail.property_id
     evaluation_result = event_detail.evaluation_result
@@ -62,7 +77,9 @@ def publication_approved(event_detail, errors):
     pk = f"PROPERTY#{pk_details}"
     sk = f"{street}#{str(number)}".replace(' ', '-').lower()
 
-    print(f"Storing new property in DynamoDB with PK {pk} and SK {sk}")
+    metrics.add_metric(name='PropertiesAdded', unit=MetricUnit.Count, value=1)
+
+    logger.info(f"Storing new property in DynamoDB with PK {pk} and SK {sk}")
     dynamodb_response = table.update_item(
         Key={
             'PK': pk,
@@ -76,11 +93,15 @@ def publication_approved(event_detail, errors):
         },
     )
     http_status_code = dynamodb_response['ResponseMetadata']['HTTPStatusCode']
-    print(f"Stored item in DynamoDB; responded with status code {http_status_code}")
+    logger.info(f"Stored item in DynamoDB; responded with status code {http_status_code}")
+
+    metrics.add_metric(name='PropertiesApproved', unit=MetricUnit.Count, value=1)
 
     return { 'result': 'Successfully updated property status' }
 
 
+@tracer.capture_lambda_handler  # type: ignore
+@metrics.log_metrics
 def lambda_handler(event, context):
     """Main entry point for Property Approval lambda function
 
@@ -96,10 +117,12 @@ def lambda_handler(event, context):
     Success message upon successful storage of the approval outcome into DynamoDB
     """
 
-    print(event)
+    logger.info(event)
 
     errors = None if 'workflowErrors' not in event['detail'] else event['detail'].pop('workflowErrors')
 
     # Deserialize event into strongly typed object
+    awsEvent:AWSEvent = Marshaller.unmarshall(event, AWSEvent)  # type: ignore
+    detail:PublicationEvaluationCompleted = awsEvent.detail  # type: ignore
 
     return publication_approved(detail, errors)

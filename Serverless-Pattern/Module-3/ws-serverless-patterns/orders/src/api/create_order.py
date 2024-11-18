@@ -8,7 +8,7 @@ from datetime import datetime
 from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.metrics import MetricUnit
 
-from aws_lambda_powertools.utilities.typing import LambdaContext
+from aws_lambda_powertools.utilities.typing import  
 
 from aws_lambda_powertools.utilities.idempotency import (
     IdempotencyConfig, DynamoDBPersistenceLayer, idempotent

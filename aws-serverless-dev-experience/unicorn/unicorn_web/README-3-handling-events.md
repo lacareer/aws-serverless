@@ -60,8 +60,13 @@ For the solution to work, it requires a DynamoDB table to contain records which 
 As we want to independent of other teams in our development of this service, we are going to load some dummy records to DynamoDB table.
 
 1. Load Dummy data    
+    # add chmod permission to execute script if not already set
+        ./data/load_data.sh 
 
-    ./data/load_data.sh
+    # If the 'yq' package was not installed on my machine so I did the substitute 'OR'
+        web_table_name="$(aws cloudformation describe-stacks --stack-name uni-prop-local-web --query "Stacks[0].Outputs[?OutputKey=='WebTableName'].OutputValue" --output text)"
+
+        aws ddb put $web_table_name  file://./data/property_data.json
 
 2. Verify that data exists in DynamoDB table
    Run following command to verify whether the sample records have successfully been loaded to DynamoDB:    
@@ -87,4 +92,13 @@ You should see an output similar to below:
     SK: main-street#222
     city: Main Town
     street: My Street
-    ScannedCount: 3    
+    ScannedCount: 3   
+
+<!-- Completing the integrations -->
+Before the Unicorn Properties service can process the PublicationApprovalRequested, the Unicorn Properties Service needs to create a subscription (rule) on the Unicorn Web event bus.
+
+To complete the integration between these two services, go back to the unicorn-properties/integration folder and open the subscriptions.yaml
+
+Enable the PublicationApprovalRequestedSubscriptionRule rule that has been commented out (and the output) and redeploy the Properties service.
+
+Verify that the unicorn.properties-PublicationApprovalRequested has been created on the UnicornWebBus-local event bus.     

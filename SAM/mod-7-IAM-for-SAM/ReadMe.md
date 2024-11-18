@@ -2,6 +2,8 @@
 
 # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-reference.html
 
+# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-templates.html
+
 
 ******DO NOT COPY THE OTHER "sam-app" INTO THIS DIRECTORY AS THIS IS PROJECT FOCUS ON SERVERLESS IAM PERMISSION******
 
@@ -23,6 +25,8 @@ sam IAM can be done using either of the following:
     2. Inline and AWS Managed Policies: See link below on how it can be apply to the sam-app project in this directory
         
         https://catalog.workshops.aws/complete-aws-sam/en-US/module-7-permissions/50-inline-and-managed-policy
+
+        https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-templates.html
 
     3. SAM Connectors: See link below on how it can be apply to the sam-app project in this directory
 

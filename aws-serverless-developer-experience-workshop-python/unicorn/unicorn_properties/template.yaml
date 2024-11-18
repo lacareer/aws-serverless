@@ -237,10 +237,10 @@ Resources:
       DefinitionUri: state_machine/property_approval.asl.yaml
       Tracing:
         Enabled: true
-      Policies:
+      Policies:     
         - AWSXRayDaemonWriteAccess
         - ComprehendBasicAccessPolicy: {}
-        - RekognitionDetectOnlyPolicy: {}
+        - RekognitionDetectOnlyPolicy: {}       
         - LambdaInvokePolicy:
             FunctionName: !Ref WaitForContractApprovalFunction
         - LambdaInvokePolicy:
@@ -263,7 +263,7 @@ Resources:
                 - logs:DescribeResourcePolicies
                 - logs:DescribeLogGroups
                 - cloudwatch:PutMetricData
-              Resource: "*"
+              Resource: "*"   
       Logging:
         Destinations:
           - CloudWatchLogsLogGroup:
