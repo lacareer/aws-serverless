@@ -1,6 +1,6 @@
 
 <!-- Continue from Module-2 -->
-If you completed module 2 - Synchronous Invocation and kept the resources, skip ahead to Create a project (It was my case).
+If you completed module 2 - Synchronous Invocation and kept the resources, skip ahead to Create a project (I was my case).
 
 <!-- Deploy prerequisite resources (if necessary) -->
 If you did not complete module 2 - Synchronous Invocation, or you want to start from a known-good start state, take these steps.
