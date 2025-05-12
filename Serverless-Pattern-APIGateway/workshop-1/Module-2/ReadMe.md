@@ -378,7 +378,7 @@ Take note of the API Endpoint value from the build. Use it to validate the API w
 
     curl <API Endpoint>/users
 
-You should see an empty response with [] is this is the first deployment of the stack 
+You should see an empty response with [] if this is the first deployment of the stack 
 or it returns the users in the db if you have completed the previous steps in this module
 <!-- 3.1 - Create User Pool -->
 For the API authentication and authorization, you will use a Lambda Authorizer function in API Gateway. 

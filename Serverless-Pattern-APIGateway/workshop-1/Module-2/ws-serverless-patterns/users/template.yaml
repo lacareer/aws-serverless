@@ -119,7 +119,7 @@ Resources:
           AttributeDataType: String
           Mutable: true
           Required: true
-      UsernameAttributes: 
+      UsernameAttributes: resolve conp
         - email
       UserPoolTags:
           Key: Name

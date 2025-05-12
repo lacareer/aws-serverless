@@ -121,6 +121,7 @@ Resources:
             Path: /orders
             Method: get
             RestApiId: !Ref WorkshopApiGateway
+  
   EditOrderFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -142,6 +143,7 @@ Resources:
             Path: /orders/{orderId}
             Method: put
             RestApiId: !Ref WorkshopApiGateway
+  
   CancelOrderFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -163,6 +165,7 @@ Resources:
             Path: /orders/{orderId}
             Method: delete
             RestApiId: !Ref WorkshopApiGateway
+  
   PyUtils:
     Type: AWS::Serverless::LayerVersion
     Properties:

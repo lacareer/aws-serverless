@@ -45,7 +45,7 @@ Now that the environment and event are ready, invoke the function locally to ver
 
     sam local invoke -e events/event-post-user.json -n env.json
 
-The first time this runs, SAM will build a container image (make sure docker service is r unning or the docker desktop for windows is running and integrated with wsl if that is what you are using).  
+The first time this runs, SAM will build a container image (make sure docker service is running or the docker desktop for windows is running and integrated with wsl if that is what you are using).  
 This will take a minute or so. Subsequent runs will be immediate.
 
 You should eventually see a response, similar to the following, with a 200 status and data for a new User record:
