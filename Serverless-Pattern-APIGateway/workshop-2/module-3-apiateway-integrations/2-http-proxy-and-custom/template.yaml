@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+    module3-http-rest-api: Sample SAM Template for module3-http-rest-api
+
+Globals:
+
+    # Enable Logs
+    Api:
+        MethodSettings:
+            - ResourcePath: "/*"
+              HttpMethod: "*"
+              DataTraceEnabled: True
+              LoggingLevel: INFO
+              MetricsEnabled: True
+    Function:
+        Timeout: 3
+        Runtime: nodejs18.x
+
+Resources:
+
+    # HTTP Integration Example API
+    HttpIntegrationExampleAPI:
+        Type: AWS::Serverless::Api
+        Properties:
+            StageName: dev
+            OpenApiVersion: 3.0.3
+            DefinitionBody: # an OpenApi definition
+                "Fn::Transform":
+                    Name: "AWS::Include"
+                    Parameters:
+                        Location: "openapi.yaml"
+            EndpointConfiguration:
+                Type: REGIONAL
+
+    # Target API to emulate an exposed HTTP endpoint
+    TargetApi:
+        Type: AWS::Serverless::Api
+        Properties:
+            Name: TargetApi
+            StageName: dev
+
+    # Function as Back-End to Target API
+    ItemsFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: ./handlers
+            Handler: item.handler
+            Policies:
+                - DynamoDBCrudPolicy:
+                    TableName: !Ref SampleTable
+            Environment:
+                Variables:
+                    SAMPLE_TABLE: !Ref SampleTable
+                    REGION: !Sub "${AWS::Region}" 
+            Events:
+                GetItems:
+                    Type: Api
+                    Properties:
+                        Path: /items
+                        Method: GET
+                        RestApiId: !Ref TargetApi
+                PostItem:
+                    Type: Api
+                    Properties:
+                        Path: /items
+                        Method: POST
+                        RestApiId: !Ref TargetApi
+                        
+    SampleTable:
+        Type: AWS::Serverless::SimpleTable
+        Properties:
+            PrimaryKey:
+                Name: id
+                Type: String
+            ProvisionedThroughput:
+                ReadCapacityUnits: 2
+                WriteCapacityUnits: 2
+
+Outputs:
+
+    TargetApiEndpoint:
+        Description: Target API endpoint URL for Dev stage
+        Value: !Sub "https://${TargetApi}.execute-api.${AWS::Region}.amazonaws.com/${TargetApi.Stage}/"
+    
+    RestApiEndpoint:
+        Description: Rest API endpoint URL for Dev stage (Http Integration Example API)
+        Value: !Sub "https://${HttpIntegrationExampleAPI}.execute-api.${AWS::Region}.amazonaws.com/${HttpIntegrationExampleAPI.Stage}/"

@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-http-rest-api: Sample SAM Template for module3-http-rest-api
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+  Function:
+    Timeout: 3
+    Runtime: nodejs18.x
+Resources:
+  HttpIntegrationExampleAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  TargetApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: TargetApi
+      StageName: dev
+  ItemsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ItemsFunction
+      Handler: item.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: SampleTable
+      Environment:
+        Variables:
+          SAMPLE_TABLE:
+            Ref: SampleTable
+          REGION:
+            Fn::Sub: ${AWS::Region}
+      Events:
+        GetItems:
+          Type: Api
+          Properties:
+            Path: /items
+            Method: GET
+            RestApiId:
+              Ref: TargetApi
+        PostItem:
+          Type: Api
+          Properties:
+            Path: /items
+            Method: POST
+            RestApiId:
+              Ref: TargetApi
+    Metadata:
+      SamResourceId: ItemsFunction
+  SampleTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+Outputs:
+  TargetApiEndpoint:
+    Description: Target API endpoint URL for Dev stage
+    Value:
+      Fn::Sub: https://${TargetApi}.execute-api.${AWS::Region}.amazonaws.com/${TargetApi.Stage}/
+  RestApiEndpoint:
+    Description: Rest API endpoint URL for Dev stage (Http Integration Example API)
+    Value:
+      Fn::Sub: https://${HttpIntegrationExampleAPI}.execute-api.${AWS::Region}.amazonaws.com/${HttpIntegrationExampleAPI.Stage}/

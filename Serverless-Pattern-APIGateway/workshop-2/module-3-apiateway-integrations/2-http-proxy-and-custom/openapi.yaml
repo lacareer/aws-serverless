@@ -1,0 +1,62 @@
+openapi: "3.0.1"
+info:
+    title: "module-3-http-integration"
+    description: "API Gateway example for HTTP Integration"
+    version: "1.0"
+
+paths:
+  # https proxy integration
+  # passes all request to another api gateway () that is attached to a lambda backend that takes care of all/some the methods as you want
+  /{proxy+}:
+    x-amazon-apigateway-any-method:
+      parameters:
+      - name: "proxy"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+      x-amazon-apigateway-integration:
+        requestParameters:
+            integration.request.path.proxy: method.request.path.proxy
+        # https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-swagger-extensions-any-method.html
+        # https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-swagger-extensions-integration.html
+        httpMethod: "ANY"
+        type: "http_proxy"
+        uri:
+            Fn::Sub: "https://${TargetApi}.execute-api.${AWS::Region}.amazonaws.com/${TargetApi.Stage}/{proxy}"
+        passthroughBehavior: "when_no_match"
+  
+  # https custom integration
+  # means you can add your own custom error codes and other custom config
+  # it still passes the request to the lambda backend
+  /store:
+    get:
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "200 OK"
+        "404":
+          description: "404 No Content Found"
+      x-amazon-apigateway-integration:
+        httpMethod: "GET"
+        uri: 
+          Fn::Sub: "https://${TargetApi}.execute-api.${AWS::Region}.amazonaws.com/${TargetApi.Stage}/items"
+        responses:
+          "404":
+            statusCode: "404"
+            responseTemplates:
+              # Note that lines "responses" 30 and 39 respectively define what are the HTTP codes of the method 
+              # and how the response is transformed using Apache Velocity Template Language (VTL) https://velocity.apache.org/engine/devel/vtl-reference.html            
+              application/json: "#set($inputRoot = $input.path('$'))\n{\n \"message_store\"\
+                  : \"There is no Items\" \n}"
+          default:
+            statusCode: "200"
+            responseTemplates:
+              # Note that lines "responses" 30 and 39 respectively define what are the HTTP codes of the method 
+              # and how the response is transformed using Apache Velocity Template Language (VTL) https://velocity.apache.org/engine/devel/vtl-reference.html
+              application/json: "#set($inputRoot = $input.path('$'))\n{\n \"items\"\
+                  : $input.json('$'),\n \"message_store\": \"There is something around\
+                  \ the corner\"\n}"
+        passthroughBehavior: "when_no_match"
+        type: "http"
