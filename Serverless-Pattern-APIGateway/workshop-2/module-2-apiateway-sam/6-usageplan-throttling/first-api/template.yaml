@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Sample SAM Template for my first API with IaC
+
+Globals:
+    Api:
+        ## Enables Caching: which indicates whether caching is enabled for the stage.
+        CacheClusterEnabled: True
+        # Enables Cache size
+        #The CacheClusterSize  is the stage's cache capacity in GB, the allowed values are: 0.5 | 1.6 | 118 | 13.5 | 237 | 28.4 | 58.2 | 6.1
+        CacheClusterSize: "0.5"
+        # Enable Logs
+        MethodSettings:
+            - ResourcePath: "/*"
+              HttpMethod: "*"
+              DataTraceEnabled: True
+              LoggingLevel: INFO
+              MetricsEnabled: True
+              #specifies whether the cached responses are encrypted.
+              #specifies the time to live (TTL), in seconds, for cached responses.
+              #specifies whether responses should be cached and returned for requests. A cache cluster must be enabled on the stage for responses to be cached.
+              CacheDataEncrypted: True
+              CacheTtlInSeconds: 60
+              CachingEnabled: True
+    #sets lambda timeout and runtime
+    Function:
+        Timeout: 3
+        Runtime: nodejs18.x
+
+Resources:
+
+  # REST API                                                             
+  FirstAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody: # an OpenApi definition
+        "Fn::Transform":
+          Name: "AWS::Include"
+          Parameters:
+            Location: "openapi.yaml"
+      EndpointConfiguration:
+          Type: REGIONAL
+      # specifically setting caching on the method "/medianpricecalculator" because it is POST method
+      # Important
+      # When you enable caching for a stage, only GET methods have caching enabled by default. This helps to ensure the safety and availability of your API. 
+      # You can enable caching for other methods by overriding method settings.
+      MethodSettings:
+      - ResourcePath: "/medianpricecalculator"
+        HttpMethod: "POST"
+        CacheDataEncrypted: True
+        CacheTtlInSeconds: 60
+        CachingEnabled: True          
+    
+  # Usage Plan for REST API
+  FirstAPIUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+      - FirstAPIdevStage
+    Properties:
+      ApiStages:
+        - ApiId: !Ref FirstAPI
+          Stage: dev
+          # we're defining the method throttle to /medianpricecalculator
+          Throttle:
+            "/medianpricecalculator/POST":
+              BurstLimit: 200
+              RateLimit: 100
+      # we're defining the Description of our Usage Plan, 
+      # the Quota  that will be applied (here we're defining a quota of 5000 requests per MONTH), 
+      # the global Throttle  settings and finally the UsagePlanName.        
+      Description: Exclusive plan for our best customers
+      Quota:
+        Limit: 5000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 200
+      UsagePlanName: Platinum
+  
+  # Declares API Key for REST API and associating the API key to the stage dev of our First API 
+  FirstAPIKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn:
+      - FirstAPIUsagePlan
+    Properties:
+      Name: myFirstApiKey
+      Description: Main key for module-2-my-first-api API
+      Enabled: True
+      StageKeys:
+        - RestApiId: !Ref FirstAPI
+          StageName: dev
+            
+  # Link API Key to UsagePlan
+  # we're associating the API Key to the Usage Plan that we've created.
+  LinkUsagePlanApiKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: 
+        Ref: FirstAPIKey
+      KeyType: API_KEY
+      UsagePlanId: 
+          Ref: FirstAPIUsagePlan 
+  
+  # Lambda functions                                                     
+  CostCalculator:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: handlers/
+      Handler: cost-calculator.CostCalculator
+
+  MedianPriceCalculator:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: handlers/
+      Handler: median-price-calculator.MedianPriceCalculator      
+
+  # Declares a Cognito user pool
+  CostCalculatorUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: CostCalculatorUserPool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+  # Declares a Cognito user pool client that references our user pool
+  CostCalculatorUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        UserPoolId: !Ref CostCalculatorUserPool
+        ClientName: Cost-Calculator-App-Client
+        GenerateSecret: false
+        ExplicitAuthFlows:
+          - ALLOW_ADMIN_USER_PASSWORD_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+          - ALLOW_CUSTOM_AUTH
+          - ALLOW_USER_PASSWORD_AUTH
+          - ALLOW_USER_SRP_AUTH      
+          
+  # Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: AllowLambdaExec
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'lambda:InvokeFunction'
+                Resource: 
+                  - !GetAtt CostCalculator.Arn
+                  - !GetAtt MedianPriceCalculator.Arn
+
+Outputs:
+  FirstAPI:
+    Description: "API Gateway endpoint URL to call my first api"
+    Value: !Sub "https://${FirstAPI}.execute-api.${AWS::Region}.amazonaws.com/dev/"
+  CognitoUserPool:
+    Description: "Cognito User Pool Id"
+    Value: !Ref CostCalculatorUserPool
+  CostCalculatorUserPoolClient:
+    Description: "App Client Id"
+    Value: !Ref CostCalculatorUserPoolClient

@@ -1,0 +1,44 @@
+openapi: "3.0.1"
+info:
+  title: "module-3-mock-integration"
+  version: "1.0"
+paths:
+  /pets:
+    get:
+      parameters:
+      - name: "scope"
+        in: "query"
+        schema:
+          type: "string"
+      responses:
+        "500":
+          description: "500 response"
+          content: {}
+        "200":
+          description: "200 response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Empty"
+      x-amazon-apigateway-integration:
+        responses:
+          default:
+            statusCode: "200"
+            responseTemplates:
+              application/json: "{\n    \"statusCode\": 200,\n    \"message\": \"\
+                Go ahead without me\"\n}"
+          "5\\d{2}":
+            statusCode: "500"
+            responseTemplates:
+              application/json: "{\n    \"statusCode\": 500,\n    \"message\": \"\
+                The invoked method is not supported on the API resource.\"\n}"
+        requestTemplates:
+          application/json: "{\n  #if( $input.params('scope') == \"internal\" )\n\
+            \    \"statusCode\": 200\n  #else\n    \"statusCode\": 500\n  #end\n}"
+        passthroughBehavior: "when_no_match"
+        type: "mock"
+components:
+  schemas:
+    Empty:
+      title: "Empty Schema"
+      type: "object"

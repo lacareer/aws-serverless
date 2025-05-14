@@ -1,0 +1,28 @@
+openapi: "3.0.1"
+info:
+  title: "module-2-my-first-api"
+  description: "First API with IaC example"
+  version: "1.0"
+
+paths:
+
+  /pricepermeter:
+    post:
+      consumes:
+      - "application/json"
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "200 response"
+      x-amazon-apigateway-integration:
+        httpMethod: "POST"
+        credentials:
+            Fn::GetAtt: [LambdaExecutionRole, Arn]
+        uri: 
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CostCalculator.Arn}/invocations"
+        responses:
+          default:
+            statusCode: "200"
+        passthroughBehavior: "when_no_match"
+        type: "aws"

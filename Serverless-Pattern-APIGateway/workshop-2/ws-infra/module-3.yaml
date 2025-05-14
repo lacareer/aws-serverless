@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloudformation template for Module 3 Setup
+
+Parameters:
+  ProjectName:
+    Description: Optional - Name of this project. The name of the resources created by this template will be prefixed with this name.
+    Type: String
+    Default: agws
+    AllowedPattern: ^\w+$
+  Ec2AmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Main Parameters
+        Parameters:
+          - ProjectName
+
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: 10.0.0.0/16
+    PublicSubnetA:
+      CIDR: 10.0.0.0/24
+    PublicSubnetB:
+      CIDR: 10.0.1.0/24
+    PrivateSubnetA:
+      CIDR: 10.0.10.0/24
+    PrivateSubnetB:
+      CIDR: 10.0.11.0/24
+  Misc:
+    Ec2:
+      InstanceType: t3.micro
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [SubnetConfig, VPC, CIDR]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-VPC
+  # Public subnet A
+  SubnetAPublic:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !FindInMap [SubnetConfig, PublicSubnetA, CIDR]
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-Subnet-Public-A
+  # Private subnet B
+  SubnetAPrivate:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !FindInMap [SubnetConfig, PrivateSubnetA, CIDR]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-Subnet-Private-A
+  # Public subnet B
+  SubnetBPublic:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !FindInMap [SubnetConfig, PublicSubnetB, CIDR]
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-Subnet-Public-B
+  # Private subnet B
+  SubnetBPrivate:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !FindInMap [SubnetConfig, PrivateSubnetB, CIDR]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-Subnet-Private-B
+  #Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-IGW
+  # VPC Gateway Attachment
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  # Elastic IP A
+  EIPA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-EIP-A
+  # Elastic IP B
+  EIPB:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-EIP-B
+  # NAT Gateway A
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIPA.AllocationId
+      SubnetId: !Ref SubnetAPublic
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-NATGW-A
+  # NAT Gateway B
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIPB.AllocationId
+      SubnetId: !Ref SubnetBPublic
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-NATGW-B
+  # Route Table Public
+  RouteTablePublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-RT-Public
+  # Route Table Private A
+  RouteTablePrivateSubnetA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-RT-Private-A
+  # Route Table Private B
+  RouteTablePrivateSubnetB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-RT-Private-B
+  # Route Table Public Internet Route
+  RouteTablePublicInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTablePublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  # Route Table Private Internet Route A
+  RouteTablePrivateInternetRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTablePrivateSubnetA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+  # Route Table Private Internet Route A
+  RouteTablePrivateInternetRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTablePrivateSubnetB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+  # Route Table Association Public A
+  RouteTableAssociationAPublic:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetAPublic
+      RouteTableId: !Ref RouteTablePublic
+  # Route Table Association Private A
+  RouteTableAssociationAPrivate:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetAPrivate
+      RouteTableId: !Ref RouteTablePrivateSubnetA
+  # Route Table Association Public B
+  RouteTableAssociationBPublic:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetBPublic
+      RouteTableId: !Ref RouteTablePublic
+  # Route Table Association Private B
+  RouteTableAssociationBPrivate:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetBPrivate
+      RouteTableId: !Ref RouteTablePrivateSubnetB
+  # Security Group to be associated to EC2 launch config
+  SecurityGroupWebservers:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTP (80) and SSH (22) from the VPC CIDR
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !FindInMap [SubnetConfig, VPC, CIDR]
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !FindInMap [SubnetConfig, VPC, CIDR]
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !FindInMap [SubnetConfig, VPC, CIDR]
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-SG-Webserver
+  # Internal NLB
+  NlbInternal:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${ProjectName}-NLB-Internal
+      Scheme: internal
+      Type: network
+      Subnets:
+        - !Ref SubnetAPrivate
+        - !Ref SubnetBPrivate
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: True
+  # TCP listener for internal NLB
+  ListenerTcpNlbInternal:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupTcpNlbInternal
+      LoadBalancerArn: !Ref NlbInternal
+      Port: 80
+      Protocol: TCP
+  # Target group for internal NLB
+  TargetGroupTcpNlbInternal:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 80
+      Protocol: TCP
+      VpcId: !Ref VPC
+      Name: !Sub ${ProjectName}-TG-TCP-NLB-Internal
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  # Launch template containing EC2 with httpd server installed exposing a sample endpoint
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          baseline_install:
+            - cfn-hup
+            - install-ws
+        cfn-hup:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackName}
+                region=${AWS::Region}
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.LaunchTemplate.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchTemplate --configsets cfn-hup --region ${AWS::Region}
+                runas=root
+              mode: '000400'
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                  - /etc/cfn/cfn-hup.conf
+                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+        install-ws:
+          packages:
+            yum:
+              httpd: []
+          services:
+            sysvinit:
+              httpd:
+                enabled: true
+                ensureRunning: true
+    Properties:
+      LaunchTemplateName: !Sub ${ProjectName}-LaunchTemplate
+      LaunchTemplateData:
+        ImageId: !Ref Ec2AmiId
+        InstanceType: !FindInMap [Misc, Ec2, InstanceType]
+        SecurityGroupIds:
+          - !Ref SecurityGroupWebservers
+        UserData:
+          Fn::Base64:
+            !Sub |
+            #!/bin/bash -xe
+            
+            yum install -y aws-cfn-bootstrap;
+            # Install the files and packages from the metadata
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchTemplate --configsets baseline_install --region ${AWS::Region} ;
+            yum update -y
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            echo "Hello World from $(hostname -f)" > /var/www/html/index.html
+
+  # Auto Scaling Group
+  ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: LaunchTemplate
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref SubnetAPrivate
+        - !Ref SubnetBPrivate
+      AutoScalingGroupName: !Sub ${ProjectName}-ASG
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 2
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref TargetGroupTcpNlbInternal
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ASG-Webserver
+          PropagateAtLaunch: true
+
+Outputs:
+  VpcId:
+    Description: The Id of the VPC
+    Value: !Ref VPC
+  VpcCidr:
+    Description: The CIDR of the VPC
+    Value: !GetAtt VPC.CidrBlock
+  InternalNlbArn:
+    Description: The ARN of Internal Network Load Balancer
+    Value: !Ref NlbInternal
+  InternalNlbDns:
+    Description: The DNSName of Internal Network Load Balancer
+    Value: !GetAtt NlbInternal.DNSName

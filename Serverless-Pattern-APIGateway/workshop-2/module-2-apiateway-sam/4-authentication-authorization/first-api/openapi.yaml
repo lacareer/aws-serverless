@@ -1,0 +1,146 @@
+openapi: "3.0.1"
+info:
+  title: "module-2-my-first-api"
+  description: "First API with IaC example"
+  version: "1.0"
+
+# setting up validation for client request
+# we are defining the All, Body and Params validators.
+x-amazon-apigateway-request-validators:
+  All:
+    validateRequestParameters: true
+    validateRequestBody: true
+  Body:
+    validateRequestParameters: false
+    validateRequestBody: true
+  Params:
+    validateRequestParameters: true
+    validateRequestBody: false
+# we are defining that the entire API paths will use the validator Body.
+x-amazon-apigateway-request-validator: Body
+
+paths:
+
+  /pricepermeter:
+    post:
+      consumes:
+      - "application/json"
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "200 response"
+      # we are defining the requestBody object to the resource /pricemeter, method POST   
+      # we are referencing the schema, model below that compares client input to a strict definition, the contains the definition for the costCalculatorRequest 
+      requestBody:
+        required: true
+        content:
+          application/json:
+              schema:
+                  $ref: '#/components/schemas/costCalculatorRequest'    
+      # References our cognoto user pool authorization below
+      security:
+        - CostCalculatorAuthorizer: []
+
+      x-amazon-apigateway-integration:
+        httpMethod: "POST"
+        credentials:
+            Fn::GetAtt: [LambdaExecutionRole, Arn]
+        uri: 
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CostCalculator.Arn}/invocations"
+        responses:
+          default:
+            statusCode: "200"
+            # Transforms the API Gateway integration reponse sent back to the client using  Velocity Template Language (VTL) engine.
+            # https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-swagger-extensions-gateway-responses.responseTemplates.html
+            # https://velocity.apache.org/engine/devel/vtl-reference.html
+            # Code below is auto-generated when you want to add Mapping Template to the API 
+            # integration response and selects "Generate template: Choose Method Request Passthrough".
+            # Go to module-1 lab instructions to learn how you can generate this from the console.
+            responseTemplates:
+              application/json: | 
+                #set($allParams = $input.params())
+                {
+                "body-json" : $input.json('$'),
+                "params" : {
+                #foreach($type in $allParams.keySet())
+                    #set($params = $allParams.get($type))
+                "$type" : {
+                    #foreach($paramName in $params.keySet())
+                    "$paramName" : "$util.escapeJavaScript($params.get($paramName))"
+                        #if($foreach.hasNext),#end
+                    #end
+                }
+                    #if($foreach.hasNext),#end
+                #end
+                },
+                "stage-variables" : {
+                #foreach($key in $stageVariables.keySet())
+                "$key" : "$util.escapeJavaScript($stageVariables.get($key))"
+                    #if($foreach.hasNext),#end
+                #end
+                },
+                "context" : {
+                    "account-id" : "$context.identity.accountId",
+                    "api-id" : "$context.apiId",
+                    "api-key" : "$context.identity.apiKey",
+                    "authorizer-principal-id" : "$context.authorizer.principalId",
+                    "caller" : "$context.identity.caller",
+                    "cognito-authentication-provider" : "$context.identity.cognitoAuthenticationProvider",
+                    "cognito-authentication-type" : "$context.identity.cognitoAuthenticationType",
+                    "cognito-identity-id" : "$context.identity.cognitoIdentityId",
+                    "cognito-identity-pool-id" : "$context.identity.cognitoIdentityPoolId",
+                    "http-method" : "$context.httpMethod",
+                    "stage" : "$context.stage",
+                    "source-ip" : "$context.identity.sourceIp",
+                    "user" : "$context.identity.user",
+                    "user-agent" : "$context.identity.userAgent",
+                    "user-arn" : "$context.identity.userArn",
+                    "request-id" : "$context.requestId",
+                    "resource-id" : "$context.resourceId",
+                    "resource-path" : "$context.resourcePath"
+                    }
+                }
+
+        # Transform the key downPayment to downPaymentAmount which is what our lambda uses
+        requestTemplates:
+          application/json: |
+            #set($inputRoot = $input.path("$"))
+            {
+                "price": "$inputRoot.price",
+                "size": "$inputRoot.size",
+                "unit": "$inputRoot.unit",
+                "downPaymentAmount": $inputRoot.downPayment
+            }            
+        passthroughBehavior: "when_no_match"
+        type: "aws"
+
+components:
+# A model, which we call costCalculatorRequest, of the data api gateway should receive
+# Will be used for request validation and transformation above
+#  read more on spec here: https://spec.openapis.org/oas/v3.1.0#components-object-example
+  schemas:
+    costCalculatorRequest:
+      type: object
+      properties:
+        price:
+            type: number
+        size:
+            type: number
+        unit:
+            type: string
+        downPayment:
+            type: number  
+  # sets up api to user our cognito user pool in template.yaml
+  # https://spec.openapis.org/oas/v3.1.0#securitySchemeObject
+  securitySchemes:
+    CostCalculatorAuthorizer:
+      type: apiKey
+      name: Authorization
+      in: header
+      x-amazon-apigateway-authtype: cognito_user_pools
+      x-amazon-apigateway-authorizer:
+        type: cognito_user_pools
+        providerARNs:
+          - Fn::GetAtt: [CostCalculatorUserPool, Arn]
+

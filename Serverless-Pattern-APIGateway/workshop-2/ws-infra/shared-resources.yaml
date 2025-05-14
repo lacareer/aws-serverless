@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloudformation template for common workshop resources to all modules
+
+# Parameters:
+#   InstanceOwner:
+#     Type: String
+#     Description: Assumed role username of Cloud9 owner, in the format 'Role/username'. Leave blank to assign leave the instance assigned to the role running the CloudFormation template.
+#     Default: ""
+
+# Conditions: 
+#   AssignCloud9Owner: !Not [!Equals [!Ref InstanceOwner, ""]]
+
+Resources:
+    ## Cloud9 IDE
+    ## C9 not needed because I am using VS Coode
+    # C9IDE:
+    #     Type: 'AWS::Cloud9::EnvironmentEC2'
+    #     Properties:
+    #       Name: 'APIGatewayWorkshopWorkspace'
+    #       Description: !Sub 'Workspace created to run The Amazon API Gateway Workshop'
+    #       ImageId: 'amazonlinux-2-x86_64'
+    #       AutomaticStopTimeMinutes: 30
+    #       InstanceType: 't3.micro'
+    #       OwnerArn: 
+    #         Fn::If:
+    #           - AssignCloud9Owner
+    #           - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:assumed-role/${InstanceOwner}
+    #           - Ref: AWS::NoValue
+    # IAM Role to allow APIGW to Log on CW
+    ApiGatewayLoggingRole:
+        Type: 'AWS::IAM::Role'
+        Properties:
+          AssumeRolePolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service:
+                    - 'apigateway.amazonaws.com'
+                Action: 'sts:AssumeRole'
+          Path: '/'
+          ManagedPolicyArns:
+            - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'
+    # Specifies the IAM role that APIGW uses to write API logs to CW Logs
+    ApiGwAccountConfig:
+        Type: AWS::ApiGateway::Account
+        Properties:
+          CloudWatchRoleArn: !GetAtt ApiGatewayLoggingRole.Arn

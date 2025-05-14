@@ -1,0 +1,14 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  Common:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: https://ws-assets-prod-iad-r-iad-ed304a55c2ca1aee.s3.us-east-1.amazonaws.com/5079f77b-4228-442e-baba-06a1065f67e1/shared_resources.yaml
+  APIGWModule1:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: https://ws-assets-prod-iad-r-iad-ed304a55c2ca1aee.s3.us-east-1.amazonaws.com/5079f77b-4228-442e-baba-06a1065f67e1/module_1.yaml
+  # APIGWModule3:
+  #   Type: 'AWS::CloudFormation::Stack'
+  #   Properties:
+  #     TemplateURL: https://ws-assets-prod-iad-r-iad-ed304a55c2ca1aee.s3.us-east-1.amazonaws.com/5079f77b-4228-442e-baba-06a1065f67e1/module_3.yaml

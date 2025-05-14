@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+    module3-mock-rest-api: Sample SAM Template for mock-rest-api
+
+Globals:
+
+    # Enable Logs
+    Api:
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          DataTraceEnabled: True
+          LoggingLevel: INFO
+          MetricsEnabled: True
+
+Resources:
+
+  # Example API Gateway
+  MockApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      EndpointConfiguration:
+        Type: "REGIONAL"
+      StageName: "dev"
+      DefinitionBody: # an OpenApi definition
+        'Fn::Transform':
+          Name: 'AWS::Include'
+          Parameters:
+            Location: './openapi.yaml'
+
+Outputs:
+    MockApi:
+        Description: "API Gateway endpoint URL to call Mock resource method api"
+        Value: !Sub "https://${MockApi}.execute-api.${AWS::Region}.amazonaws.com/dev/"
