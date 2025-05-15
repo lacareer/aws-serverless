@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'API Gateway example for AWS Step Functions Integration
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+Resources:
+  StateMachineExpress:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: StateMachineExpress
+      DefinitionUri: ../../state-machine/step-function.asl.json
+      Policies:
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - cloudwatch:*
+          - logs:*
+          Resource: '*'
+      Type: EXPRESS
+      Logging:
+        Destinations:
+        - CloudWatchLogsLogGroup:
+            LogGroupArn:
+              Fn::GetAtt:
+              - StateMachineLogGroup
+              - Arn
+        IncludeExecutionData: false
+        Level: ALL
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Join:
+        - /
+        - - stepfunctions
+          - StateMachineExpress
+  StateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: StateMachineStandard
+      DefinitionUri: ../../state-machine/step-function.asl.json
+      Policies:
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - cloudwatch:*
+          - logs:*
+          Resource: '*'
+      Type: STANDARD
+  RestApiforSyncWF:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      OpenApiVersion: 3.0.3
+      EndpointConfiguration:
+        Type: REGIONAL
+      Variables:
+        SFARNEXPRESS:
+          Fn::GetAtt:
+          - StateMachineExpress
+          - Arn
+        SFARNSTANDARD:
+          Fn::GetAtt:
+          - StateMachineStandard
+          - Arn
+  RestApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: AllowSFNExec
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - states:StartSyncExecution
+            - states:StartExecution
+            Resource:
+            - Fn::GetAtt:
+              - StateMachineExpress
+              - Arn
+            - Fn::GetAtt:
+              - StateMachineStandard
+              - Arn
+Outputs:
+  ExpressSFIntegrationRestAPI:
+    Description: Express Workflow API endpoint
+    Value:
+      Fn::Sub: https://${RestApiforSyncWF}.execute-api.${AWS::Region}.amazonaws.com/dev
+  ExpressStepFunctionsArn:
+    Description: Step Functions Express ARN
+    Value:
+      Fn::GetAtt:
+      - StateMachineExpress
+      - Arn
+  StandardStepFunctionsArn:
+    Description: Step Functions Standard ARN
+    Value:
+      Fn::GetAtt:
+      - StateMachineStandard
+      - Arn

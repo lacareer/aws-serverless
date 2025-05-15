@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-lambda-rest-api: Sample SAM Template for module3-lambda-rest-api
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+  Function:
+    Timeout: 3
+    Runtime: nodejs18.x
+Resources:
+  LambdaIntegrationExampleAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  LambdaProxySingleMethodFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: LambdaProxySingleMethodFunction
+      Handler: proxy-example.handler
+    Metadata:
+      SamResourceId: LambdaProxySingleMethodFunction
+  LambdaProxyAnyMethodFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: LambdaProxyAnyMethodFunction
+      Handler: proxy-example.handler
+    Metadata:
+      SamResourceId: LambdaProxyAnyMethodFunction
+  LambdaCustomFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: LambdaCustomFunction
+      Handler: proxy-example.handler
+    Metadata:
+      SamResourceId: LambdaCustomFunction
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: AllowLambdaExec
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource:
+            - Fn::GetAtt:
+              - LambdaProxySingleMethodFunction
+              - Arn
+            - Fn::GetAtt:
+              - LambdaProxyAnyMethodFunction
+              - Arn
+            - Fn::GetAtt:
+              - LambdaCustomFunction
+              - Arn
+Outputs:
+  Endpoint:
+    Description: API Gateway Endpoint
+    Value:
+      Fn::Sub: https://${LambdaIntegrationExampleAPI}.execute-api.${AWS::Region}.amazonaws.com/dev/resource

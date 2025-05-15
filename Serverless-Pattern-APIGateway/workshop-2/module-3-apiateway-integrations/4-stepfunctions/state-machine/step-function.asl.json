@@ -1,0 +1,33 @@
+{
+    "Comment": "A description of my state machine",
+    "StartAt": "is31?",
+    "States": {
+        "is31?": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.number",
+                    "NumericEquals": 31,
+                    "Next": "was31"
+                }
+            ],
+            "Default": "Fail"
+        },
+        "was31": {
+            "Type": "Pass",
+            "Next": "Success",
+            "Result": {
+                "message": "Hello from Step Functions!"
+            }
+        },
+        "Success": {
+            "Type": "Succeed",
+            "Comment": "SF called with success"
+        },
+        "Fail": {
+            "Type": "Fail",
+            "Error": "ERROR",
+            "Cause": "WRONG NUMBER"
+        }
+    }
+}

@@ -1,0 +1,57 @@
+openapi: "3.0.1"
+info:
+  title: "module-3-stepfunctions-integration"
+  description: "API Gateway example for AWS Step Functions Integration"
+  version: "1.0"
+
+paths:
+  /async:
+    post:
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "200 response"
+          schema:
+            $ref: "#/definitions/Empty"
+      x-amazon-apigateway-integration:
+        credentials: 
+          Fn::Sub: "${RestApiRole.Arn}"
+        httpMethod: "POST"
+        uri: "arn:aws:apigateway:${AWS::Region}:states:action/StartExecution"
+        responses:
+          default:
+            statusCode: "200"
+        requestTemplates:
+          application/json: "{\n    \"input\": \"$util.escapeJavaScript($input.json('$'))\"\
+            ,\n    \"stateMachineArn\": \"$util.escapeJavaScript($stageVariables.SFARNSTANDARD)\"\
+            \n}"
+        passthroughBehavior: "when_no_match"
+        type: "aws"
+  /sync:
+    post:
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "200 response"
+          schema:
+            $ref: "#/definitions/Empty"
+      x-amazon-apigateway-integration:
+        credentials: 
+          Fn::Sub: "${RestApiRole.Arn}"
+        httpMethod: "POST"
+        uri: "arn:aws:apigateway:${AWS::Region}:states:action/StartSyncExecution"
+        responses:
+          default:
+            statusCode: "200"
+        requestTemplates:
+          application/json: "{\n    \"input\": \"$util.escapeJavaScript($input.json('$'))\"\
+            ,\n    \"stateMachineArn\": \"$util.escapeJavaScript($stageVariables.SFARNEXPRESS)\"\
+            \n}"
+        passthroughBehavior: "when_no_match"
+        type: "aws"
+definitions:
+  Empty:
+    type: "object"
+    title: "Empty Schema"

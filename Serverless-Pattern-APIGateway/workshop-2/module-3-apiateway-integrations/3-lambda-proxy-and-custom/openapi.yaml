@@ -1,0 +1,69 @@
+openapi: "3.0.1"
+info:
+   title: "module-3-lambda-integration"
+   description: "API Gateway example for AWS Lambda proxy Integration"
+   version: "1.0"
+
+paths:
+
+    /resource:
+      get:
+        x-amazon-apigateway-integration:
+          httpMethod: "POST"
+          credentials:
+            Fn::GetAtt: [LambdaExecutionRole, Arn]
+          uri: 
+            Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaProxySingleMethodFunction.Arn}/invocations"
+          passthroughBehavior: "when_no_match"
+          type: "aws_proxy"
+      # just like in module-2-http-proxy-and-custom
+      # This is a custom proxy
+      put:
+        consumes:
+        - "application/json"
+        produces:
+        - "application/json"
+        responses:
+          "200":
+            description: "200 response"
+        x-amazon-apigateway-integration:
+          httpMethod: "POST"
+          credentials:
+            Fn::GetAtt: [LambdaExecutionRole, Arn]
+          uri: 
+            Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaCustomFunction.Arn}/invocations"
+          responses:
+            default:
+              statusCode: "200"
+              responseTemplates:
+                application/json: "#set($inputRoot = $input.path('$'))\n{\n    \"status\"\
+                  : $inputRoot.statusCode,\n    \"message\": \"$inputRoot.body\",\n\
+                  \    \"message_details\" \"This message was inserted from the response\
+                  \ transformation.\"\n}\n"
+          requestTemplates:
+            application/json: "#set($body = {\n  \"name\": $input.json('$.name'),\n\
+              \  \"age\": $input.json('$.age'),\n  \"email\": $input.json('$.email'),\n\
+              \  \"id\": \"$input.params('id')\"\n})\n#set($jsonBody = $util.escapeJavaScript($body.toString()))\n\
+              {\n  \"body\": \"$jsonBody\"\n}\n"
+          passthroughBehavior: "when_no_templates"
+          contentHandling: "CONVERT_TO_TEXT"
+          type: "aws"
+
+    # just like in module-2-http-proxy-and-custom
+    # This is an http proxy
+    /resource/{proxy+}:
+      x-amazon-apigateway-any-method:
+        parameters:
+        - name: "proxy"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        x-amazon-apigateway-integration:
+            httpMethod: "POST"
+            credentials:
+                Fn::GetAtt: [LambdaExecutionRole, Arn]
+            type: "aws_proxy"
+            uri:
+                Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaProxyAnyMethodFunction.Arn}/invocations"
+            passthroughBehavior: "when_no_match"

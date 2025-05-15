@@ -20,6 +20,7 @@ Globals:
 Resources:
 
     # HTTP Integration Example API
+    # Receives all client request and forwards it to TargetApi proxy
     HttpIntegrationExampleAPI:
         Type: AWS::Serverless::Api
         Properties:
@@ -33,7 +34,7 @@ Resources:
             EndpointConfiguration:
                 Type: REGIONAL
 
-    # Target API to emulate an exposed HTTP endpoint
+    # Target API to emulate an exposed HTTP endpoint (proxy to backened that receives request from HttpIntegrationExampleAPI)
     TargetApi:
         Type: AWS::Serverless::Api
         Properties:
