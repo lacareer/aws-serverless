@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-lambda-rest-api: Sample SAM Template for module3-sqs-rest-api
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+  Function:
+    Timeout: 3
+    Runtime: nodejs18.x
+Resources:
+  OrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderQueue
+  APIWithSQSIntegration:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  IAMRoleForSQSIntegration:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: PolicyForAPIGWSQSIntegration
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource:
+            - Fn::GetAtt:
+              - OrderQueue
+              - Arn
+  SQSConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: SQSConsumerFunction
+      Handler: queue-consumer.handler
+      Policies:
+      - SQSPollerPolicy:
+          QueueName:
+            Fn::GetAtt:
+            - OrderQueue
+            - QueueName
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: OrderTable
+      Environment:
+        Variables:
+          SAMPLE_TABLE:
+            Ref: OrderTable
+          REGION:
+            Fn::Sub: ${AWS::Region}
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - OrderQueue
+              - Arn
+    Metadata:
+      SamResourceId: SQSConsumerFunction
+  OrderTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+Outputs:
+  Endpoint:
+    Description: API Gateway Endpoint
+    Value:
+      Fn::Sub: https://${APIWithSQSIntegration}.execute-api.${AWS::Region}.amazonaws.com/dev/order

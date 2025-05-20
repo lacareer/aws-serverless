@@ -1,0 +1,145 @@
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless pattern API Gateway to EventBridge
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+  Function:
+    Timeout: 3
+    Runtime: nodejs18.x
+Resources:
+  MyBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-bus
+  ApiGatewayEventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path:
+        Fn::Join:
+        - ''
+        - - /
+          - Ref: AWS::StackName
+          - /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: AllowApiGatewayServiceToAssumeRole
+          Effect: Allow
+          Action:
+          - sts:AssumeRole
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+      Policies:
+      - PolicyName: EBPutEvents
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - events:PutEvents
+            Resource:
+            - Fn::GetAtt:
+              - MyBus
+              - Arn
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  QueueTarget:
+    Type: AWS::SQS::Queue
+  QueueRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: SQSEventRule
+      EventBusName:
+        Ref: MyBus
+      EventPattern:
+        account:
+        - Fn::Sub: ${AWS::AccountId}
+        source:
+        - demo.event
+        detail-type:
+        - POSTED
+        detail:
+          target:
+          - SQS
+      Targets:
+      - Arn:
+          Fn::GetAtt:
+          - QueueTarget
+          - Arn
+        Id: QueueTarget
+  EventBridgeToQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: SQS:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - QueueTarget
+            - Arn
+      Queues:
+      - Ref: QueueTarget
+  LambdaTarget:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: LambdaTarget
+      Handler: lambda-target-example.handler
+    Metadata:
+      SamResourceId: LambdaTarget
+  LambdaRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: MyBus
+      Targets:
+      - Arn:
+          Fn::GetAtt:
+          - LambdaTarget
+          - Arn
+        Id: LambdaTarget
+      EventPattern:
+        account:
+        - Fn::Sub: ${AWS::AccountId}
+        source:
+        - demo.event
+        detail-type:
+        - POSTED
+        detail:
+          target:
+          - LAMBDA
+  EventBridgeInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: LambdaTarget
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - LambdaRule
+        - Arn
+Outputs:
+  ApiURL:
+    Description: API Endpoint
+    Value:
+      Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/Prod

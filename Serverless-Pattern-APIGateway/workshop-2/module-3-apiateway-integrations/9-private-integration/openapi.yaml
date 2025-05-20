@@ -1,0 +1,27 @@
+openapi: "3.0.1"
+info:
+  title: "module-3-private-integration"
+  description: "API Gateway example for Private Integration"
+  version: "1.0"
+paths:
+  /internal-nlb:
+    get:
+      x-amazon-apigateway-integration:
+        connectionId: 
+            Fn::Sub:
+            - '${VpcLink}'
+            - VpcLink:
+                Ref: VpcLink
+        httpMethod: "GET"
+        uri: 
+            Fn::Sub:
+            - 'http://${InternalNlbDns}'
+            - InternalNlbDns:
+                Ref: InternalNlbDns
+        responses:
+          default:
+            statusCode: "200"
+        passthroughBehavior: "when_no_match"
+        connectionType: "VPC_LINK"
+        type: "http_proxy"
+components: {}

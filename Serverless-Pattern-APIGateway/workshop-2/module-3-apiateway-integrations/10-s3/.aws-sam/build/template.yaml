@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-s3-rest-api: Sample SAM Template for module3-s3-proxy-rest-api
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+Resources:
+  S3IntegrationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: demo-bucket-s3-proxy-${AWS::AccountId}
+  APIWithS3Integration:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  IAMRoleForS3Integration:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: RoleForAPIGatewayS3Integration
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: PolicyForAPIGWS3Integration
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+            - s3:ListBucket
+            Resource:
+            - Fn::Sub: arn:aws:s3:::demo-bucket-s3-proxy-${AWS::AccountId}/*
+            - Fn::Sub: arn:aws:s3:::demo-bucket-s3-proxy-${AWS::AccountId}

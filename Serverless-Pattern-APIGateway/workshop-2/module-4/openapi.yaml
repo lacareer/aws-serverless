@@ -1,0 +1,18 @@
+openapi: "3.0.1"
+info:
+  title: "module-4-observability"
+  version: "2023-04-10T16:25:39Z"
+servers:
+- url: "https://${ObservabilityAPI}.execute-api.${AWS::Region}.amazonaws.com/dev/generate-data"
+
+paths:
+  /generate-data:
+    get:
+      x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                credentials:
+                    Fn::GetAtt: [LambdaExecutionRole, Arn]
+                type: "aws_proxy"
+                uri:
+                    Fn::Sub: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionForDataPoints.Arn}/invocations"
+                passthroughBehavior: "when_no_match"

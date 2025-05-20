@@ -1,0 +1,36 @@
+openapi: "3.0.1"
+info:
+  title: "module-3-sqs-integration"
+  description: "API Gateway example for using SQS as direct service integration"
+  version: "1.0"
+
+paths:
+  /order:
+    post:
+        produces:
+        - "application/json"
+        responses:
+          "200":
+              description: "200 response"
+              schema:
+                $ref: "#/definitions/Empty"
+        x-amazon-apigateway-integration:
+          credentials:
+              Fn::Sub: ${IAMRoleForSQSIntegration.Arn}
+          httpMethod: "POST"
+          uri:
+              Fn::Sub: "arn:aws:apigateway:${AWS::Region}:sqs:path/${AWS::AccountId}/${OrderQueue.QueueName}"
+          responses:
+              default:
+                statusCode: "200"
+          requestTemplates:
+              application/json: "Action=SendMessage&MessageBody=$input.body"
+          requestParameters:
+              integration.request.header.Content-Type: "'application/x-www-form-urlencoded'"
+          passthroughBehavior: "when_no_match"
+          type: "aws"
+
+definitions:
+  Empty:
+    type: "object"
+    title: "Empty Schema"

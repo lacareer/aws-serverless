@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+    Deploys a network load balancer and EC2 instance
+
+Parameters:
+    MyVPC:
+        Type: String
+        Description: My custom VPC ID  
+        Default: "vpc-0a2b45d56308c2606"
+    MyPrivateSubnet1:
+        Type: String
+        Description: My custom VPC private subnet 1
+        Default: "subnet-04b6471a472ecd6a0 "
+    MyPrivateSubnet2:
+        Type: String
+        Description: My custom VPC private subnet 2
+        Default: "subnet-027c1884720f53b0c"
+    MyPublicSubnet1:
+        Type: String
+        Description: My custom VPC private subnet 2
+        Default: "subnet-0120adb10afbe8d3a"
+    MyPublicSubnet2:
+        Type: String
+        Description: My custom VPC private subnet 2
+        Default: "subnet-0f9dba06f20f0a70a"
+    MyKeyPair:
+        Type: String
+        Description: My EC2 KeyPair name
+        Default: "mykeyPrivateIntegration"
+
+Resources:
+
+    MyInstance:
+        Type: 'AWS::EC2::Instance'
+        Properties: 
+            ImageId: ami-0953476d60561c955
+            InstanceType: t2.micro
+            # KeyName: !Ref MyKeyPair
+            SecurityGroupIds:
+                - !GetAtt InstanceSecurityGroup.GroupId
+            SubnetId: !Ref MyPublicSubnet1
+            UserData:
+                Fn::Base64: !Sub |
+                  #!/bin/bash
+                  sudo yum update -y
+                  sudo yum install -y httpd
+                  sudo systemctl start httpd
+                  sudo systemctl enable httpd
+                  echo "<h1>Hello World from $(hostname -f)</h1>" | sudo tee /var/www/html/index.html
+
+    InstanceSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Allow http to client EC2 host
+            VpcId: !Ref MyVPC
+            SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              # CidrIp: 0.0.0.0/0
+              SourceSecurityGroupId: !GetAtt NLBSecurityGroup.GroupId
+            SecurityGroupEgress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+
+    NLBSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Allow http to client host
+            SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            SecurityGroupEgress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            VpcId: !Ref MyVPC
+
+    # Network load balancer
+    NetworkLB:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+          SecurityGroups: 
+            - !GetAtt NLBSecurityGroup.GroupId
+          Type: network 
+          Subnets: 
+            - !Ref MyPrivateSubnet1
+            - !Ref MyPrivateSubnet2
+          Scheme: internal
+          # EnforceSecurityGroupInboundRulesOnPrivateLinkTraffic: "off"
+    
+    # Network load balancer TG
+    NetworkLBTG:            
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            Name: My-NetworkLBTG
+            HealthCheckEnabled: true
+            HealthCheckIntervalSeconds: 30
+            # HealthCheckPath: /
+            HealthCheckPort: 80
+            HealthCheckProtocol: TCP # http/https for ALB
+            HealthCheckTimeoutSeconds: 25
+            HealthyThresholdCount: 5
+            # This is used for ECS
+            # # TargetType: ip
+            TargetType: instance
+            # Skip Target Node if ECS
+            Targets:
+              - Id: !Ref MyInstance            
+            Port: 80
+            # TCP, TLS, UDP, and TCP_UDP are the options for NLB
+            Protocol: TCP
+            # # HTTP and HTTPS are the options for ALB
+            # Protocol: HTTP
+            UnhealthyThresholdCount: 3
+            VpcId: !Ref MyVPC
+
+    # Network load balancer listerner rule
+    NetworkLBTGListener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+            DefaultActions: 
+              - Type: forward
+                TargetGroupArn: !Ref NetworkLBTG
+            LoadBalancerArn: !Ref NetworkLB
+            Port: 80
+            # TCP, TLS, UDP, and TCP_UDP are the options for NLB
+            Protocol: TCP
+            # # HTTP and HTTPS are the options for ALB
+            # Protocol: HTTP
+
+
+
+
+
+
+

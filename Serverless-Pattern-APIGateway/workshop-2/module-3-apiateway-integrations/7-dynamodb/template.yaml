@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: API Gateway with DynamoDB integration using SAM
+
+Globals:
+
+    # Enable Logs
+    Api:
+        MethodSettings:
+            - ResourcePath: "/*"
+              HttpMethod: "*"
+              DataTraceEnabled: True
+              LoggingLevel: INFO
+              MetricsEnabled: True
+
+Resources:
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: MyTable
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+ # APIGW Rest API for DynamoDB Integration Example
+  RestApiforDynamoDB:
+     Type: AWS::Serverless::Api
+     Properties:
+        StageName: dev
+        DefinitionBody: # an OpenApi definition
+          'Fn::Transform':
+            Name: 'AWS::Include'
+            Parameters:
+              Location: 'openapi.yaml'
+        OpenApiVersion: 3.0.3
+        EndpointConfiguration:
+            Type: REGIONAL
+          
+  # IAM Role to allow APIGW to call DynamoDB
+  RestApiRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - apigateway.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+      - PolicyName: AllowDynamoDBExec
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: 
+                - "dynamodb:Query"
+                - "dynamodb:PutItem"
+                - "dynamodb:UpdateItem"
+              Resource: 
+                - !GetAtt DynamoDBTable.Arn
+
+Outputs:
+  MyApiUrl:
+    Description: URL of the API
+    Value: !Sub "https://${RestApiforDynamoDB}.execute-api.${AWS::Region}.amazonaws.com/dev"

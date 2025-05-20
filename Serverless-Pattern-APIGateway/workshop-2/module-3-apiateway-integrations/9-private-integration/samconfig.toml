@@ -1,0 +1,10 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "module-3-private-integration"
+resolve_s3 = true
+s3_prefix = "module-3-private-integration"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "InternalNlbArn=\"arn:aws:elasticloadbalancing:us-east-1:066638479762:loadbalancer/net/my-ec2-Netwo-lMRsVnsmlvuH/441ce4b700aa8ebd\" InternalNlbDns=\"my-ec2-Netwo-lMRsVnsmlvuH-441ce4b700aa8ebd.elb.us-east-1.amazonaws.com\""
+image_repositories = []

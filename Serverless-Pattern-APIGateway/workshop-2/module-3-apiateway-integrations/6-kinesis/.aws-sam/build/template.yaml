@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-kinesis: Sample SAM Template for module3-kinesis
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+  Function:
+    Timeout: 3
+    Runtime: nodejs18.x
+Parameters:
+  KinesisStreamName:
+    Type: String
+    Default: KinesisStreamAPIGW
+Resources:
+  KinesisStreamAPIGW:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name:
+        Ref: KinesisStreamName
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+  IAMRoleForKinesisIntegration:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: PolicyForAPIGWKinesisIntegration
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: kinesis:PutRecord
+            Resource:
+              Fn::GetAtt:
+              - KinesisStreamAPIGW
+              - Arn
+  APIWithKinsesisIntegration:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  GetRecordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetRecordsFunction
+      Handler: get-records.handler
+      Policies:
+      - KinesisCrudPolicy:
+          StreamName:
+            Ref: KinesisStreamName
+      Events:
+        Stream:
+          Type: Kinesis
+          Properties:
+            Stream:
+              Fn::GetAtt:
+              - KinesisStreamAPIGW
+              - Arn
+            BatchSize: 100
+            StartingPosition: LATEST
+    Metadata:
+      SamResourceId: GetRecordsFunction
+Outputs:
+  APIGatewayEndpoint:
+    Description: API Gateway Endpoint
+    Value:
+      Fn::Sub: https://${APIWithKinsesisIntegration}.execute-api.${AWS::Region}.amazonaws.com/dev/streams/${KinesisStreamName}/record
+  KinesisARN:
+    Description: ARN for Kinesis data stream
+    Value:
+      Fn::GetAtt:
+      - KinesisStreamAPIGW
+      - Arn

@@ -1,0 +1,43 @@
+openapi: "3.0.1"
+info:
+  title: "module-3-event-bridge-integration"
+  description: "API Gateway example for using EventBridge as direct service integration"
+  version: "1.0"
+
+paths:
+  /:
+    post:
+      responses:
+        "200":
+          description: "200 response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Empty"
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::GetAtt: [ApiGatewayEventBridgeRole, Arn]
+        httpMethod: "POST"
+        type: "aws"
+        uri: 
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:events:action/PutEvents"
+        responses:
+          default:
+            statusCode: "200"
+            responseTemplates:
+               application/json: "{\n  \"status_code\": 200,\n  \"event_id\":  $input.json(\"\
+                $.Entries\"),\n  \"request_id\": $context.requestId\n}"
+        requestTemplates:
+          application/json: "#set($context.requestOverride.header.X-Amz-Target = \"\
+            AWSEvents.PutEvents\")\n#set($context.requestOverride.header.Content-Type\
+            \ = \"application/x-amz-json-1.1\")\n#set($inputRoot = $input.path('$'))\n\
+            {\n    \"Entries\": [\n        {\n            \"Detail\": \"{ \\\"target\\\
+            \": \\\"$inputRoot.Target\\\" }\",\n            \"DetailType\": \"$inputRoot.DetailType\"\
+            ,\n            \"EventBusName\": \"module-3-eventbridge-integration-bus\"\
+            ,\n            \"Source\": \"$inputRoot.Source\"\n        }\n    ]\n}"
+        passthroughBehavior: "when_no_templates"
+components:
+  schemas:
+    Empty:
+      title: "Empty Schema"
+      type: "object"

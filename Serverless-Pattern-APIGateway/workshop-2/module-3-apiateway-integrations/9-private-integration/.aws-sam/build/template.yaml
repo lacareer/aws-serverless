@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-private-integration-rest-api: Sample SAM Template for module3-private-integration-rest-api
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+Parameters:
+  InternalNlbArn:
+    Type: String
+    Description: ARN of the Internal Network Load Balancer to link to the REST API
+    Default: arn:aws:elasticloadbalancing:us-east-1:066638479762:loadbalancer/net/my-ec2-Netwo-lMRsVnsmlvuH/441ce4b700aa8ebd
+  InternalNlbDns:
+    Type: String
+    Description: DNS of the Internal Network Load Balancer to use in to the REST API
+      Integration
+    Default: my-ec2-Netwo-lMRsVnsmlvuH-441ce4b700aa8ebd.elb.us-east-1.amazonaws.com
+Resources:
+  PrivateIntegrationExampleAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+  VpcLink:
+    Type: AWS::ApiGateway::VpcLink
+    Properties:
+      Name: RestAPILinkInternalNLB
+      Description: VPC Link for REST API
+      TargetArns:
+      - Fn::Sub:
+        - ${InternalNlbArn}
+        - InternalNlbArn:
+            Ref: InternalNlbArn
+Outputs:
+  RestApiEndpoint:
+    Description: Rest API endpoint URL for Dev stage (Private Integration Example
+      API)
+    Value:
+      Fn::Sub: https://${PrivateIntegrationExampleAPI}.execute-api.${AWS::Region}.amazonaws.com/${PrivateIntegrationExampleAPI.Stage}/
+  VpcLinkId:
+    Description: ID of the created VPC Link
+    Value:
+      Ref: VpcLink

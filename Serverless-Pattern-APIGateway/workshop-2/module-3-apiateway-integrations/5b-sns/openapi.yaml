@@ -1,0 +1,35 @@
+
+openapi: "3.0.1"
+info:
+   title: "module-3-sns-integration"
+   description: "API Gateway example for using SNS as direct service integration"
+   version: "1.0"
+
+paths:
+  /email-me:
+    post:
+      consumes:
+      - "application/json"
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "200 response"
+          schema:
+            $ref: "#/definitions/Empty"
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:sns:path//"
+        credentials: 
+          Fn::Sub: ${IAMRoleForSNSIntegration.Arn}
+        httpMethod: "POST"
+        responses:
+          default:
+            statusCode: "200"
+        requestTemplates:
+          application/json: 
+            Fn::Sub: "Action=Publish&TopicArn=$util.urlEncode('${SNSTopicForAPIGW}')&Message=$util.urlEncode($input.body)"
+        requestParameters:
+          integration.request.header.Content-Type: "'application/x-www-form-urlencoded'"
+        passthroughBehavior: "never"
+        type: "aws"
+

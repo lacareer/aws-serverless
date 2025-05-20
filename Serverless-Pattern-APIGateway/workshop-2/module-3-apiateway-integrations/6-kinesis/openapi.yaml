@@ -1,0 +1,80 @@
+
+openapi: 3.0.0
+info:
+  title: module-3-kinesis-integration
+  version: '2016-03-31T18:25:32Z'
+paths:
+  /streams/{stream-name}/record:
+    put:
+      parameters:
+        - name: stream-name
+          in: path
+          required: true
+          schema:
+            type: string
+        - in: body
+          name: RequestBodyModel
+          required: true
+          schema:
+            $ref: "#/components/schemas/PutRecordMethodRequestPayload"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutRecordMethodRequestPayload"
+        required: true
+      responses:
+        '200':
+          description: 200 response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empty'
+      x-amazon-apigateway-request-validator: "basic"
+      x-amazon-apigateway-integration:
+        type: aws
+        credentials:
+          Fn::Sub: ${IAMRoleForKinesisIntegration.Arn}
+        uri: arn:aws:apigateway:${AWS::Region}:kinesis:action/PutRecord
+        responses:
+          default:
+            statusCode: '200'
+        requestParameters:
+          integration.request.header.Content-Type: '''application/x-amz-json-1.1'''
+        requestTemplates:
+          application/json: |-
+            {
+                "StreamName": "$input.params('stream-name')",
+                "Data": "$util.base64Encode($input.json('$.Data'))",
+                "PartitionKey": "$input.path('$.PartitionKey')"
+            }
+        passthroughBehavior: when_no_match
+        httpMethod: POST
+components:
+  schemas:
+    Empty:
+      type: object
+    PutRecordMethodRequestPayload:
+      title: "PutRecordMethodRequestPayload"
+      required:
+      - "Data"
+      - "PartitionKey"
+      type: "object"
+      properties:
+        Data:
+          title: "The Data Schema"
+          type: "string"
+        PartitionKey:
+          title: "The PartitionKey Schema"
+          type: "string"
+      additionalProperties: false
+x-amazon-apigateway-request-validators:
+  basic:
+    validateRequestParameters: true
+    validateRequestBody: true
+# The response it sends when an additional property is added to the rquired request properties/parameters    
+x-amazon-apigateway-gateway-responses:
+  BAD_REQUEST_BODY:
+    statusCode: 400
+    responseTemplates:
+      application/json: "{\"message\": \"$context.error.message\", \"error\": \"$context.error.validationErrorString\"}"

@@ -1,0 +1,71 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+   module3-sns: Sample SAM Template for module3-sns
+
+Globals:
+
+    #Enable Logs
+    Api:
+        MethodSettings:
+            - ResourcePath: "/*"
+              HttpMethod: "*"
+              DataTraceEnabled: True
+              LoggingLevel: INFO
+              MetricsEnabled: True
+
+Resources:
+
+    #Create the SNS Topic
+    SNSTopicForAPIGW:
+        Type: AWS::SNS::Topic
+        Properties: 
+          TopicName: MyAPIGWSNSTopic
+
+    #Create the IAM role      
+    IAMRoleForSNSIntegration:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service:
+                        - apigateway.amazonaws.com
+                    Action:
+                      - 'sts:AssumeRole'
+            Path: /
+            Policies:
+                - PolicyName: PolicyForAPIGWSQSIntegration
+                  PolicyDocument:
+                    Version: "2012-10-17"
+                    Statement:
+                      - Effect: Allow
+                        Action: 'sns:Publish'
+                        Resource: !Ref SNSTopicForAPIGW
+    
+    # Create the API Gateway 
+    APIWithSNSIntegration:
+        Type: AWS::Serverless::Api
+        Properties:
+            StageName: dev
+            OpenApiVersion: 3.0.3
+            DefinitionBody: # an OpenApi definition
+                "Fn::Transform":
+                    Name: "AWS::Include"
+                    Parameters:
+                        Location: "openapi.yaml"
+            EndpointConfiguration:
+                Type: REGIONAL
+    
+Outputs:
+    APIGatewayEndpoint:
+            Description: API Gateway Endpoint
+            Value:
+                Fn::Sub: https://${APIWithSNSIntegration}.execute-api.${AWS::Region}.amazonaws.com/dev/email-me
+    SNSTopicARN:
+            Description: ARN for SNS topic
+            Value:
+                Fn::Sub: ${SNSTopicForAPIGW}

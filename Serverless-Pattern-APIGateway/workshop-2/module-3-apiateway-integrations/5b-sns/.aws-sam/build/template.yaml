@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module3-sns: Sample SAM Template for module3-sns
+
+  '
+Globals:
+  Api:
+    MethodSettings:
+    - ResourcePath: /*
+      HttpMethod: '*'
+      DataTraceEnabled: true
+      LoggingLevel: INFO
+      MetricsEnabled: true
+Resources:
+  SNSTopicForAPIGW:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: MyAPIGWSNSTopic
+  IAMRoleForSNSIntegration:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: PolicyForAPIGWSQSIntegration
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource:
+              Ref: SNSTopicForAPIGW
+  APIWithSNSIntegration:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      OpenApiVersion: 3.0.3
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../../openapi.yaml
+      EndpointConfiguration:
+        Type: REGIONAL
+Outputs:
+  APIGatewayEndpoint:
+    Description: API Gateway Endpoint
+    Value:
+      Fn::Sub: https://${APIWithSNSIntegration}.execute-api.${AWS::Region}.amazonaws.com/dev/email-me
+  SNSTopicARN:
+    Description: ARN for SNS topic
+    Value:
+      Fn::Sub: ${SNSTopicForAPIGW}
