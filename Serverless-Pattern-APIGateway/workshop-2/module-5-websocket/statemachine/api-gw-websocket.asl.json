@@ -1,0 +1,157 @@
+{
+  "Comment": "AWSome Pizza Bar Flow",
+  "StartAt": "Notify User - Order accepted",
+  "States": {
+    "Notify User - Order accepted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "target": "LAMBDA to notify user via WebSocket",
+              "connectionId.$": "$.connectionId",
+              "status": "order accepted",
+              "orderDetails.$": "$.data"
+            },
+            "DetailType": "OrderStatusChangedEvent",
+            "EventBusName": "${PizzaOrderEventBus}",
+            "Source": "WebsocketEvent"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Wait for 5 Seconds"
+    },
+    "Wait for 5 Seconds": {
+      "Next": "Notify User - Pizza is on preparation",
+      "Seconds": 5,
+      "Type": "Wait"
+    },
+    "Notify User - Pizza is on preparation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "target": "LAMBDA to notify user via WebSocket",
+              "connectionId.$": "$.connectionId",
+              "status": "order is now being prepared",
+              "orderDetails.$": "$.data"
+            },
+            "DetailType": "OrderStatusChangedEvent",
+            "EventBusName": "${PizzaOrderEventBus}",
+            "Source": "WebsocketEvent"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Wait for 5 Seconds (1)"
+    },
+    "Wait for 5 Seconds (1)": {
+      "Seconds": 5,
+      "Type": "Wait",
+      "Next": "Notify User - Pizza is Baking"
+    },
+    "Notify User - Pizza is Baking": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "target": "LAMBDA to notify user via WebSocket",
+              "connectionId.$": "$.connectionId",
+              "status": "order is undergoing the baking process",
+              "orderDetails.$": "$.data"
+            },
+            "DetailType": "OrderStatusChangedEvent",
+            "EventBusName": "${PizzaOrderEventBus}",
+            "Source": "WebsocketEvent"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Wait for 5 Seconds (2)"
+    },
+    "Wait for 5 Seconds (2)": {
+      "Seconds": 5,
+      "Type": "Wait",
+      "Next": "Notify User - Pizza is packaged"
+    },
+    "Notify User - Pizza is packaged": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "target": "LAMBDA to notify user via WebSocket",
+              "connectionId.$": "$.connectionId",
+              "status": "order is packed",
+              "orderDetails.$": "$.data"
+            },
+            "DetailType": "OrderStatusChangedEvent",
+            "EventBusName": "${PizzaOrderEventBus}",
+            "Source": "WebsocketEvent"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Wait for 5 Seconds (3)"
+    },
+    "Wait for 5 Seconds (3)": {
+      "Seconds": 5,
+      "Type": "Wait",
+      "Next": "Notify User - Delivery is out"
+    },
+    "Notify User - Delivery is out": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "target": "LAMBDA to notify user via WebSocket",
+              "connectionId.$": "$.connectionId",
+              "status": "order is sent for delivery",
+              "orderDetails.$": "$.data"
+            },
+            "DetailType": "OrderStatusChangedEvent",
+            "EventBusName": "${PizzaOrderEventBus}",
+            "Source": "WebsocketEvent"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Wait for 5 Seconds (4)"
+    },
+    "Wait for 5 Seconds (4)": {
+      "Seconds": 5,
+      "Type": "Wait",
+      "Next": "Notify User - Delivered"
+    },
+    "Notify User - Delivered": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Detail": {
+              "target": "LAMBDA to notify user via WebSocket",
+              "connectionId.$": "$.connectionId",
+              "status": "order delivered",
+              "orderDetails.$": "$.data"
+            },
+            "DetailType": "OrderStatusChangedEvent",
+            "EventBusName": "${PizzaOrderEventBus}",
+            "Source": "WebsocketEvent"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "End": true
+    }
+  }
+}

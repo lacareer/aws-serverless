@@ -1,0 +1,413 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'module-5-WebSocket: SAM Template for using websocket with API Gateway.
+
+  '
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: nodejs18.x
+Parameters:
+  ApiStageName:
+    Description: Name of WebSockets API stage
+    Type: String
+    Default: api
+Resources:
+  LambdaPizzaHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: LambdaPizzaHandler
+      Handler: lambda-target-example.handler
+      Environment:
+        Variables:
+          SESSION_TABLE:
+            Fn::Sub: ${AWS::StackName}-Sessions
+          ORDER_TABLE:
+            Fn::Sub: ${AWS::StackName}-Orders
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Fn::Sub: ${AWS::StackName}-Sessions
+      - DynamoDBCrudPolicy:
+          TableName:
+            Fn::Sub: ${AWS::StackName}-Orders
+      - Statement:
+        - Sid: ManageWebSocketConnectionsPolicy
+          Effect: Allow
+          Action:
+          - execute-api:ManageConnections
+          Resource:
+            Fn::Sub:
+            - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${API_ID}/api/POST/@connections/*
+            - API_ID:
+                Ref: WebSocketApi
+    Metadata:
+      SamResourceId: LambdaPizzaHandler
+  LambdaRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: PizzaOrderEventBus
+      Targets:
+      - Arn:
+          Fn::GetAtt:
+          - LambdaPizzaHandler
+          - Arn
+        Id: LambdaPizzaHandler
+      EventPattern:
+        source:
+        - WebsocketEvent
+        detail-type:
+        - OrderStatusChangedEvent
+  EventBridgeInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: LambdaPizzaHandler
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - LambdaRule
+        - Arn
+  PizzaOrderEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-EventBus
+  WorkflowExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: states.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: AllowEventBridgePutEvents
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: events:PutEvents
+            Resource:
+              Fn::GetAtt:
+              - PizzaOrderEventBus
+              - Arn
+  MyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/events/${AWS::StackName}
+  EventBusLogRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Send all events to CloudWatch Logs
+      EventBusName:
+        Ref: PizzaOrderEventBus
+      EventPattern:
+        source:
+        - prefix: ''
+      State: ENABLED
+      Targets:
+      - Arn:
+          Fn::Sub: arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${MyLogGroup}
+        Id: CloudWatchLogTarget
+    DependsOn: PizzaOrderEventBus
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-WebSocketApi
+      Description: API Gateway WebSocket API
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+    - DefaultRoute
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName:
+        Ref: ApiStageName
+      DeploymentId:
+        Ref: Deployment
+      ApiId:
+        Ref: WebSocketApi
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target:
+        Fn::Join:
+        - /
+        - - integrations
+          - Ref: DefaultRouteIntegration
+  DefaultRouteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      IntegrationType: AWS
+      IntegrationMethod: POST
+      IntegrationUri:
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
+      CredentialsArn:
+        Fn::Sub: ${StepFunctionsAsyncExecutionRole.Arn}
+      TemplateSelectionExpression: \$default
+      RequestTemplates:
+        $default:
+          Fn::Sub: "#set($sfn_input=$util.escapeJavaScript($input.body).replaceAll(\"\
+            \\\\'\",\"'\")) { \n  \"input\": \"{\\\"data\\\":$sfn_input, \\\"connectionId\\\
+            \":\\\"$context.connectionId\\\"}\",\n  \"stateMachineArn\": \"${APIGatewayStepFuncState}\"\
+            \n}\n"
+  DefaultRouteResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      RouteId:
+        Ref: DefaultRoute
+      ApiId:
+        Ref: WebSocketApi
+      RouteResponseKey: $default
+  DefaultRouteIntegrationResponse:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      IntegrationId:
+        Ref: DefaultRouteIntegration
+      IntegrationResponseKey: $default
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target:
+        Fn::Join:
+        - /
+        - - integrations
+          - Ref: ConnectRouteIntegration
+  ConnectRouteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      IntegrationType: AWS
+      IntegrationMethod: POST
+      IntegrationUri:
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem
+      CredentialsArn:
+        Fn::Sub: ${SessionsTableAccessRole.Arn}
+      TemplateSelectionExpression: \$default
+      RequestTemplates:
+        $default:
+          Fn::Sub: "#set($ttl = $context.requestTimeEpoch + 86400) { \n    \"TableName\"\
+            : \"${SessionsTable}\",\n    \"Item\": {\n        \"connectionId\": {\n\
+            \            \"S\": \"$context.connectionId\"\n        },\n        \"\
+            domainName\": {\n            \"S\": \"$context.domainName\"\n        },\n\
+            \        \"stage\": {\n            \"S\": \"$context.stage\"\n       \
+            \ },\n        \"headers\": {\n            \"S\": \"$input.params().get('header')\"\
+            \n        },\n        \"querystring\": {\n            \"S\": \"$input.params().get('querystring')\"\
+            \n        },\n        \"ttl\": {\n            \"N\": \"$ttl\"\n      \
+            \  },\n        \"orderId\" : {\n            \"S\": \"\"\n        }\n \
+            \   }     \n}\n"
+  ConnectRouteResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      RouteId:
+        Ref: ConnectRoute
+      ApiId:
+        Ref: WebSocketApi
+      RouteResponseKey: $default
+  ConnectRouteIntegrationResponse:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      IntegrationId:
+        Ref: ConnectRouteIntegration
+      IntegrationResponseKey: /200/
+      TemplateSelectionExpression: \$default
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target:
+        Fn::Join:
+        - /
+        - - integrations
+          - Ref: DisconnectRouteIntegration
+  DisconnectRouteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      IntegrationType: AWS
+      IntegrationMethod: POST
+      IntegrationUri:
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:dynamodb:action/DeleteItem
+      CredentialsArn:
+        Fn::Sub: ${SessionsTableAccessRole.Arn}
+      TemplateSelectionExpression: \$default
+      RequestTemplates:
+        $default:
+          Fn::Sub: "{ \n    \"TableName\": \"${SessionsTable}\",\n    \"Key\": {\n\
+            \  \"connectionId\": {\n            \"S\": \"$context.connectionId\"\n\
+            \            }\n    }\n}\n"
+  DisconnectRouteResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      RouteId:
+        Ref: DisconnectRoute
+      ApiId:
+        Ref: WebSocketApi
+      RouteResponseKey: $default
+  DisconnectRouteIntegrationResponse:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId:
+        Ref: WebSocketApi
+      IntegrationId:
+        Ref: DisconnectRouteIntegration
+      IntegrationResponseKey: /200/
+      TemplateSelectionExpression: \$default
+  OrderTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-Orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: orderId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: orderId
+        KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-Sessions
+      AttributeDefinitions:
+      - AttributeName: connectionId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: connectionId
+        KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      BillingMode: PAY_PER_REQUEST
+  SessionsTableAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+      Path: /
+      Policies:
+      - PolicyName: DynamoDBAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - dynamodb:DeleteItem
+            - dynamodb:PutItem
+            Resource:
+            - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SessionsTable}
+  APIGatewayStepFuncState:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Type: STANDARD
+      DefinitionUri: ../../statemachine/api-gw-websocket.asl.json
+      DefinitionSubstitutions:
+        APIEndPoint:
+          Fn::Sub: ${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com
+        PizzaOrderEventBus:
+          Fn::Sub: ${AWS::StackName}-EventBus
+      Role:
+        Fn::Sub: ${StepFuncStateRole.Arn}
+      Tracing:
+        Enabled: true
+  StepFuncStateRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - states.amazonaws.com
+      Path: /
+      Policies:
+      - PolicyName: AllowEventBridgePutEvents
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: events:PutEvents
+            Resource:
+              Fn::GetAtt:
+              - PizzaOrderEventBus
+              - Arn
+  StepFunctionsAsyncExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - apigateway.amazonaws.com
+      Path: /
+      Policies:
+      - PolicyName: StepFunctionsAsyncExecution
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - states:StartExecution
+            Resource:
+              Ref: APIGatewayStepFuncState
+Outputs:
+  APIEndpoint:
+    Description: API Gateway WebSocket endpoint URL
+    Value:
+      Fn::Sub: wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}
+  SessionsTable:
+    Description: DynamoDB sessions table for WebSocket API connection ID tracking
+    Value:
+      Ref: SessionsTable
