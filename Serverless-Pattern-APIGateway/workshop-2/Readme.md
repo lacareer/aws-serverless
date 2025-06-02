@@ -2,6 +2,8 @@
 
 ** Workshop was completed using us-east-1 region **
 
+***https://catalog.us-east-1.prod.workshops.aws/workshops/5079f77b-4228-442e-baba-06a1065f67e1/en-US***
+
 <!-- Workshop setup -->
 
 Add the following files in ws-infra folder to an s3 bucket

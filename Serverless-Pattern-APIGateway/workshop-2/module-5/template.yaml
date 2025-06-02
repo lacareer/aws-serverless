@@ -376,7 +376,7 @@ Resources:
     Type: AWS::Serverless::StateMachine
     Properties:
       Type: STANDARD
-      DefinitionUri: statemachine/api-gw-websocket-asl.json
+      DefinitionUri: statemachine/api-gw-websocket.asl.json
       DefinitionSubstitutions:
         APIEndPoint: !Sub "${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com"
         PizzaOrderEventBus: !Sub '${AWS::StackName}-EventBus'
