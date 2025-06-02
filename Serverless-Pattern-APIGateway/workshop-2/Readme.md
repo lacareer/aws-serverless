@@ -13,8 +13,7 @@ Now, using the AWS console, go to CloudFormation, deploy the workshop infrastruc
 
 OR
 
-You can also deploy the individual template in the same order: shared-resources.yaml, module-1.yaml, and module-3.yaml with named stack being api-gateway-workshop-shared, api-gateway-workshop-functions
-, and api-gateway-workshop-vpc respectively
+You can also deploy the individual template in the same order: shared-resources.yaml, module-1.yaml, and module-3.yaml with named stack being api-gateway-workshop-shared, api-gateway-workshop-functions, and api-gateway-workshop-vpc respectively
 
 
 
