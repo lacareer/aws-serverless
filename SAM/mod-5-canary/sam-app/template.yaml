@@ -37,6 +37,8 @@ Resources:
             Path: /hello
             Method: get
       AutoPublishAlias: live
+      # see docs here for more example in using hooks
+      # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/automating-updates-to-serverless-apps.html
       DeploymentPreference:
         Type: !If [IsProduction, "Canary10Percent5Minutes", "AllAtOnce"]
         Alarms: !If [IsProduction, [!Ref CanaryErrorsAlarm], []]

@@ -6,6 +6,7 @@
 
 <!-- Workshop setup -->
 
+
 Add the following files in ws-infra folder to an s3 bucket
     - shared-resources.yaml
     - module-1.yaml
