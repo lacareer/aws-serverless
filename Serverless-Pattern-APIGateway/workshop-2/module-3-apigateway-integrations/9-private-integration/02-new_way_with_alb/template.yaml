@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Lab: Build scalable REST APIs using Amazon API Gateway private integration
+  with an Application Load Balancer (ALB) via VPC Link v2.
+  Reference:
+  https://aws.amazon.com/blogs/compute/build-scalable-rest-apis-using-amazon-api-gateway-private-integration-with-application-load-balancer/
+
+  Deploys:
+    - Internal (private) Application Load Balancer in the imported private subnets
+    - Security groups for the ALB and the VPC Link
+    - A listener that returns a sample JSON response ("Hello from internal ALB")
+    - An API Gateway REST API
+    - A VPC Link v2 pointing at the private subnets
+    - A REST API resource + ANY method with a direct private integration to the ALB
+    - A deployment and a "test" stage
+
+Parameters:
+  ApiName:
+    Type: String
+    Default: test-rest-api
+    Description: Name of the API Gateway REST API.
+
+  VpcLinkName:
+    Type: String
+    Default: test-vpc-link-v2
+    Description: Name of the VPC Link v2.
+
+  StageName:
+    Type: String
+    Default: test
+    Description: Name of the API Gateway deployment stage.
+
+  ResourcePath:
+    Type: String
+    Default: internal-alb
+    Description: The REST API resource path part that maps to the internal ALB.
+
+  AlbListenerPort:
+    Type: Number
+    Default: 80
+    Description: The port the internal ALB listener listens on and that API Gateway routes to.
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Security groups
+  # ---------------------------------------------------------------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the internal Application Load Balancer.
+      VpcId: !ImportValue VpcAId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic from the ALB.
+      Tags:
+        - Key: Name
+          Value: internal-alb-sg
+
+  VpcLinkSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group attached to the API Gateway VPC Link v2.
+      VpcId: !ImportValue VpcAId
+      Tags:
+        - Key: Name
+          Value: vpc-link-v2-sg
+
+  # Allow the VPC Link to reach the ALB on the listener port.
+  VpcLinkToAlbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref VpcLinkSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref AlbListenerPort
+      ToPort: !Ref AlbListenerPort
+      DestinationSecurityGroupId: !Ref AlbSecurityGroup
+      Description: Allow the VPC Link to send traffic to the internal ALB.
+
+  # Allow the ALB to receive traffic from the VPC Link.
+  AlbFromVpcLinkIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref AlbListenerPort
+      ToPort: !Ref AlbListenerPort
+      SourceSecurityGroupId: !Ref VpcLinkSecurityGroup
+      Description: Allow inbound traffic from the API Gateway VPC Link v2.
+
+  # ---------------------------------------------------------------------------
+  # Internal Application Load Balancer
+  # ---------------------------------------------------------------------------
+  InternalAlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: test-internal-alb
+      Scheme: internal
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Subnets:
+        - !ImportValue VpcAPrivateSubnetAZ1
+        - !ImportValue VpcAPrivateSubnetAZ2
+        - !ImportValue VpcAPrivateSubnetAZ3
+      Tags:
+        - Key: Name
+          Value: test-internal-alb
+
+  # Default listener returns a static JSON payload so the lab is self-contained.
+  AlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref InternalAlb
+      Port: !Ref AlbListenerPort
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "200"
+            ContentType: application/json
+            MessageBody: '{"message": "Hello from internal ALB"}'
+
+  # ---------------------------------------------------------------------------
+  # VPC Link v2 (connects API Gateway to the private subnets)
+  # ---------------------------------------------------------------------------
+  VpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Properties:
+      Name: !Ref VpcLinkName
+      SubnetIds:
+        - !ImportValue VpcAPrivateSubnetAZ1
+        - !ImportValue VpcAPrivateSubnetAZ2
+        - !ImportValue VpcAPrivateSubnetAZ3
+      SecurityGroupIds:
+        - !Ref VpcLinkSecurityGroup
+
+  # ---------------------------------------------------------------------------
+  # REST API
+  # ---------------------------------------------------------------------------
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref ApiName
+      Description: REST API integration with internal ALB via VPC link v2.
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: !Ref ResourcePath
+
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref ApiResource
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: HTTP_PROXY
+        IntegrationHttpMethod: ANY
+        ConnectionType: VPC_LINK
+        ConnectionId: !Ref VpcLink
+        # Direct private integration targets the ALB listener by ARN.
+        IntegrationTarget: !Ref InternalAlb
+        Uri: !Sub "http://${InternalAlb.DNSName}/${ResourcePath}"
+        PassthroughBehavior: WHEN_NO_MATCH
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiMethod
+    Properties:
+      RestApiId: !Ref RestApi
+      Description: Initial deployment for the internal ALB private integration lab.
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: !Ref StageName
+
+Outputs:
+  InvokeUrl:
+    Description: Base invoke URL for the REST API stage.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/${ResourcePath}"
+
+  RestApiId:
+    Description: ID of the REST API.
+    Value: !Ref RestApi
+
+  VpcLinkId:
+    Description: ID of the VPC Link v2.
+    Value: !Ref VpcLink
+
+  InternalAlbArn:
+    Description: ARN of the internal Application Load Balancer.
+    Value: !Ref InternalAlb
+
+  InternalAlbDnsName:
+    Description: DNS name of the internal Application Load Balancer.
+    Value: !GetAtt InternalAlb.DNSName
